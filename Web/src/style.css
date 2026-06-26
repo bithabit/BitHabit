@@ -1,0 +1,420 @@
+/* ========================================
+   BitHabit - 全局样式
+   移动端优先 · 375px 基准
+   ======================================== */
+
+/* --- Reset & Base --- */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --color-primary: #4F46E5;
+  --color-primary-hover: #4338CA;
+  --color-primary-disabled: #A5B4FC;
+  --color-bg: #F8FAFC;
+  --color-card: #FFFFFF;
+  --color-text: #1E293B;
+  --color-text-secondary: #64748B;
+  --color-text-placeholder: #94A3B8;
+  --color-border: #E2E8F0;
+  --color-border-focus: #4F46E5;
+  --color-error: #EF4444;
+  --color-error-bg: #FEF2F2;
+  --color-success: #10B981;
+  --color-input-bg: #F1F5F9;
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-family);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app,
+#app-root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+/* ========================================
+   认证页面（登录/注册共用）
+   ======================================== */
+
+.auth-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
+}
+
+.auth-container {
+  width: 100%;
+  max-width: 400px;
+  background: var(--color-card);
+  border-radius: var(--radius);
+  padding: 32px 24px;
+  box-shadow: 0 4px 24px rgba(79, 70, 229, 0.08);
+}
+
+/* --- 顶栏（注册页） --- */
+.auth-topbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.auth-topbar h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  flex: 1;
+  text-align: center;
+}
+
+.back-link {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.back-link:hover {
+  color: var(--color-primary);
+}
+
+.spacer {
+  width: 56px; /* 与返回链接等宽，保持居中 */
+}
+
+/* --- 头部 Logo --- */
+.auth-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.logo {
+  font-size: 3rem;
+  margin-bottom: 8px;
+}
+
+.auth-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+/* --- 错误提示 --- */
+.error-banner {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  font-size: 0.875rem;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+/* --- 表单 --- */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.input-label {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  background: var(--color-input-bg);
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--color-border-focus);
+  background: var(--color-card);
+}
+
+.input-icon {
+  font-size: 1rem;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.input-wrapper input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 0.9375rem;
+  padding: 12px 0;
+  color: var(--color-text);
+  outline: none;
+  font-family: var(--font-family);
+}
+
+.input-wrapper input::placeholder {
+  color: var(--color-text-placeholder);
+}
+
+/* 密码切换按钮 */
+.toggle-password {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px;
+  color: var(--color-text-placeholder);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.toggle-password:hover {
+  color: var(--color-text-secondary);
+}
+
+/* 用户名查重状态指示器 */
+.input-status {
+  font-size: 1rem;
+  margin-left: 8px;
+  flex-shrink: 0;
+  font-weight: bold;
+}
+
+.input-status.checking {
+  color: var(--color-text-placeholder);
+  animation: pulse 1s infinite;
+}
+
+.input-status.ok {
+  color: var(--color-success);
+}
+
+.input-status.err {
+  color: var(--color-error);
+}
+
+/* 字段提示 */
+.field-hint {
+  font-size: 0.75rem;
+  margin-top: 4px;
+  padding-left: 4px;
+}
+
+.hint-ok {
+  color: var(--color-success);
+}
+
+.hint-err {
+  color: var(--color-error);
+}
+
+/* --- 主按钮 --- */
+.btn-primary {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+  font-family: var(--font-family);
+  margin-top: 8px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.btn-primary:disabled {
+  background: var(--color-primary-disabled);
+  cursor: not-allowed;
+}
+
+.btn-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Spinner */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* --- 底部链接 --- */
+.auth-footer {
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin-top: 24px;
+}
+
+.link {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* ========================================
+   首页（占位）
+   ======================================== */
+
+.home-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--color-card);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.home-header h1 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.user-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.greeting {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.btn-logout {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-card);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  font-family: var(--font-family);
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.btn-logout:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.home-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.placeholder-card {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.placeholder-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+
+.placeholder-text {
+  font-size: 1rem;
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.placeholder-hint {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+/* ========================================
+   响应式
+   ======================================== */
+
+@media (min-width: 768px) {
+  .auth-page {
+    padding: 48px 32px;
+  }
+
+  .auth-container {
+    padding: 40px 32px;
+  }
+}

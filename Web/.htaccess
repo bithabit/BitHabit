@@ -1,0 +1,18 @@
+RewriteEngine On
+RewriteBase /
+
+# 传递 Authorization header
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# 如果请求的文件或目录存在，直接使用
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# API 路由映射到 .php 文件
+RewriteRule ^api/(.+)$ api/$1.php [L,QSA]
+
+# SPA fallback: 所有其他路由 → dist/index.html（生产构建产物）
+# ⚠️ 不要改回 index.html —— 会污染 Vite 构建入口
+RewriteRule ^ dist/index.html [L]

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+assets/*.js
+assets/*.css
+assets/*.svg
+manifest.webmanifest
+sw.js
+registerSW.js
+workbox-*.js
