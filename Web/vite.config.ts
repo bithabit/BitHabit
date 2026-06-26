@@ -32,6 +32,8 @@ export default defineConfig({
           },
         ],
       },
+      // 输出 manifest.json（而非 .webmanifest），确保 Apache 自动发送正确的 Content-Type
+      manifestFilename: 'manifest.json',
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,json,woff2}'],
         navigateFallbackDenylist: [/^\/api\//],

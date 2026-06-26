@@ -51,7 +51,9 @@ cp dist/favicon.svg assets/ 2>/dev/null || true
 
 # 5. 复制 PWA 文件到根目录（Apache 直接 serve，不经过 index.php）
 echo "📋 复制 PWA 文件到根目录..."
-cp dist/manifest.webmanifest . 2>/dev/null || true
+cp dist/manifest.json . 2>/dev/null || true
+# 清理旧格式 manifest（曾用 .webmanifest 扩展名，Apache 不识别 MIME 类型）
+rm -f manifest.webmanifest
 cp dist/sw.js . 2>/dev/null || true
 cp dist/registerSW.js . 2>/dev/null || true
 cp dist/workbox-*.js . 2>/dev/null || true
@@ -66,7 +68,7 @@ done
 # 7. 输出清单（供验证）
 echo ""
 echo "📁 根目录 PWA 文件:"
-ls -la manifest.webmanifest sw.js registerSW.js workbox-*.js 2>/dev/null || echo "  (无)"
+ls -la manifest.json sw.js registerSW.js workbox-*.js 2>/dev/null || echo "  (无)"
 echo ""
 echo "📁 assets/ 内容 ($(find assets/ -type f | wc -l) 个文件):"
 ls -la assets/ | grep -v '^total' | head -20
@@ -80,4 +82,4 @@ echo "   PWA: manifest + SW + 图标 全部就绪"
 echo ""
 echo "🧪 验证:"
 echo "   curl -so /dev/null -w '%{http_code}' http://192.168.1.22:1110/"
-echo "   curl -s http://192.168.1.22:1110/manifest.webmanifest | head -3"
+echo "   curl -s http://192.168.1.22:1110/manifest.json | head -3"
