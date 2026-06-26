@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.bithabit.app",
+    "sha256_cert_fingerprints": [
+      "157C35A72EAF65A2269175E6F5D38A5840AE2B21F0B60B90B4E4206E8CA4BF91"
+    ]
+  }
+}]

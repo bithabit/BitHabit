@@ -365,6 +365,133 @@ router.beforeEach((to, from, next) => {
 
 ---
 
+---
+
+## 任务 #5：TWA APK 签名升级 + 消除误报
+
+**优先级**：P1
+**状态**：📋 待交付
+**目标**：将 APK 改为 Google Trusted Web Activity (TWA) 模式，消除国产手机安全软件的「DeviceMaster」误报警告
+
+---
+
+### 5.1 背景
+
+任务 #4 生成的 APK（nitron + debug 签名）被华为/小米/OPPO/vivo 等国产手机安全软件误报为「DeviceMaster」风险应用。实际上是假阳性——APK 仅有 INTERNET 权限，无恶意代码。但同学收到分享后会害怕，影响分发。
+
+TWA 是 Google 官方推荐的 PWA→APK 方案，通过密码学证明「域名和包名属于同一个所有者」，Google Play Protect 识别后不再报毒。
+
+### 5.2 技术方案
+
+```
+┌─────────────┐     assetlinks.json      ┌──────────────┐
+│ bithabit.   │ ◄────────────────────── ► │ com.bithabit │
+│ dpdns.org   │    SHA256 指纹验证         │ .app (APK)   │
+└─────────────┘                           └──────────────┘
+```
+
+### 5.3 步骤
+
+#### Step 1: 生成 Release Keystore
+
+```bash
+# JRE 21 已在 /home/node/tools/jre21/jdk-21.0.11+10-jre/
+export JAVA_HOME=/home/node/tools/jre21/jdk-21.0.11+10-jre
+export PATH=$JAVA_HOME/bin:$PATH
+
+keytool -genkey -v \
+  -keystore /home/node/data/BitHabit/Web/bithabit-release.keystore \
+  -alias bithabit \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -storepass <设定密码> -keypass <设定密码> \
+  -dname "CN=BitHabit, OU=BitHabit, O=BitHabit, L=Shanghai, ST=Shanghai, C=CN"
+```
+
+#### Step 2: 创建 assetlinks.json
+
+在 `Web/public/.well-known/assetlinks.json`（Vite 构建时会复制到 dist/）：
+
+```json
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.bithabit.app",
+      "sha256_cert_fingerprints": [
+        "<RELEASE_CERT_SHA256>"
+      ]
+    }
+  }
+]
+```
+
+SHA256 指纹获取：
+```bash
+keytool -list -v -keystore bithabit-release.keystore -alias bithabit | grep SHA256
+```
+
+> ⚠️ 必须是**大写且无冒号**格式，如 `AB:CD:...` → `ABCD...`
+
+#### Step 3: 构建 TWA APK
+
+**推荐方案**：修改 nitron 构建产物，或使用 TWA 兼容模板。
+
+AndroidManifest.xml 需要包含：
+```xml
+<meta-data
+  android:name="asset_statements"
+  android:resource="@string/asset_statements" />
+```
+
+并在 `res/values/strings.xml` 中声明 asset_statements（内容指向 assetlinks.json）。
+
+**备选方案**：如果 nitron 不支持 TWA，可在现有 APK 的 AndroidManifest 中手工注入 TWA meta-data，然后用 release keystore 重新签名。
+
+#### Step 4: 签名 APK
+
+```bash
+# 用 release keystore 签名（替换 debug 签名）
+jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+  -keystore bithabit-release.keystore \
+  app.apk bithabit
+
+# zipalign（可选但推荐）
+zipalign -v 4 app.apk app-aligned.apk
+```
+
+如果 jarsigner 不可用（JRE 不含），用 `apksigner` 或 Android SDK tools。
+也可以尝试用 Python 或 Node.js 的 APK 签名工具。
+
+#### Step 5: 部署
+
+1. `assetlinks.json` 部署到 `https://bithabit.dpdns.org/.well-known/assetlinks.json`（需验证 HTTPS 可访问）
+2. 替换 `Web/app.apk` 和 `dist/app.apk`
+3. 更新 `deploy.sh` 确保 release keystore **不被提交到 git**
+
+### 5.4 验收标准
+
+- [ ] `.well-known/assetlinks.json` 可通过 HTTPS 正常访问（200 + application/json）
+- [ ] APK 使用 release keystore 签名（非 debug 签名）
+- [ ] 在国产手机（华为/小米）上安装时，不再报「DeviceMaster」病毒
+- [ ] 安装后打开，正常加载 bithabit.dpdns.org 并可使用
+- [ ] Google Play 的 TWA 验证工具通过（可选：https://play.google.com/store/apps/details?id=com.bithabit.app 的 Digital Asset Links 验证）
+
+### 5.5 约束
+
+- 无 Android SDK、无 Docker、无 root
+- JRE 21 路径：`/home/node/tools/jre21/jdk-21.0.11+10-jre/`
+- release keystore 密码需妥善保存（写入 NOTES 或 MEMORY.md，不对外公开）
+- 如果 keytool/jarsigner 缺失，可下载 JDK（非 JRE）或使用纯 Node.js 签名工具
+
+### 5.6 参考
+
+- Google TWA 文档：https://developers.google.com/web/android/trusted-web-activity
+- Digital Asset Links：https://developers.google.com/digital-asset-links
+- nitron：https://github.com/ALightbolt4G/nitron
+
+---
+
 ## 模板（后续任务使用）
 
 ### 任务 #N：任务名称
@@ -379,6 +506,110 @@ router.beforeEach((to, from, next) => {
 **API**：涉及的接口
 
 **后端须知**：PHP/DB 特定要求
+
+---
+
+## 任务 #6：APK 下载修复
+
+**优先级**：P0  
+**状态**：📋 待交付  
+**目标**：修复通过域名下载 APK 的问题，让同学能正常安装
+
+### 6.1 问题
+
+`https://bithabit.dpdns.org/app.apk` 被 Cloudflare 缓存了旧的 HTML 响应（cf-cache-status: HIT，content-type: text/html），导致下载到的是 HTML 而非 APK 二进制。手机安装时报「不兼容」。
+
+本地直连 `http://192.168.1.22:1110/app.apk` 正常（347KB，正确 MIME）。
+
+### 6.2 修复方案
+
+在 `Web/` 根目录新建 `download-app.php`：
+
+```php
+<?php
+/**
+ * APK 下载接口
+ * 独立于 index.php，强制 no-cache，解决 Cloudflare 缓存 HTML 的问题
+ */
+$apk = __DIR__ . '/dist/app.apk';
+
+if (!file_exists($apk)) {
+    http_response_code(404);
+    echo 'APK not found';
+    exit;
+}
+
+header('Content-Type: application/vnd.android.package-archive');
+header('Content-Length: ' . filesize($apk));
+header('Content-Disposition: attachment; filename="BitHabit.apk"');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+readfile($apk);
+```
+
+### 6.3 验收标准
+
+- [ ] `https://bithabit.dpdns.org/download-app.php` 返回 347KB APK 文件，content-type 正确
+- [ ] Cloudflare 响应的 `cf-cache-status` 为 `DYNAMIC` 或 `MISS`（非 HIT）
+- [ ] 同时保留 `https://bithabit.dpdns.org/app.apk` 直链（等 Cloudflare 缓存过期自动修复）
+- [ ] deploy.sh 不需要额外修改（`download-app.php` 在源码目录即可）
+
+### 6.4 通知
+
+完成后通知 Designer Agent（当前会话）。
+
+---
+
+## 任务 #7：APK 重建 — 消除嵌套套娃
+
+**优先级**：P0  
+**状态**：📋 待交付  
+**目标**：重建干净 APK（不含嵌套的旧 APK），消除小米安装错误 -124
+
+### 7.1 问题
+
+当前 APK（347KB）内部 `assets/app.apk` 嵌套了一个 192KB 的旧版 APK。
+小米安全扫描器检测到嵌套结构（恶意软件常见手法），报解析失败 -124。
+
+根因：nitron 构建时 `dist/app.apk` 已存在，被打进新 APK 里了。
+
+### 7.2 修复步骤
+
+**Step 1:** 删除 dist/app.apk
+```bash
+rm /home/node/data/BitHabit/Web/dist/app.apk
+```
+
+**Step 2:** 重新构建 APK
+```bash
+cd /home/node/data/BitHabit/Web
+npx nitron
+```
+
+**Step 3:** 复制 APK 到 dist/
+```bash
+cp app.apk dist/app.apk
+```
+
+**Step 4:** 修改 deploy.sh，在 build 前清理旧 APK
+
+在 `# 1.5. 备份 APK` 段之后加入：
+```bash
+# 1.6. 清理 dist/ 中的旧 APK（防止 nitron 重建时嵌套）
+rm -f dist/app.apk
+```
+
+### 7.3 验收
+- [ ] 新 APK 大小 < 200KB（无嵌套）
+- [ ] 新 APK 内部无 `assets/app.apk`
+- [ ] `download-app.php` 返回正确 APK
+- [ ] deploy.sh 已修改
+
+### 7.4 通知
+
+完成后通知 Designer Agent。
 
 ---
 

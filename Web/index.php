@@ -44,12 +44,18 @@ if (file_exists($distFile) && is_file($distFile)) {
         'html'          => 'text/html',
         'woff'          => 'font/woff',
         'woff2'         => 'font/woff2',
+        'apk'           => 'application/vnd.android.package-archive',
     ];
     if (isset($mimeTypes[$ext])) {
         header('Content-Type: ' . $mimeTypes[$ext] . '; charset=utf-8');
     }
-    // 静态资源缓存 1 小时
-    header('Cache-Control: public, max-age=3600');
+    // APK 文件不缓存（避免 Cloudflare 缓存旧版本）
+    if ($ext === 'apk') {
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+    } else {
+        // 其他静态资源缓存 1 小时
+        header('Cache-Control: public, max-age=3600');
+    }
     readfile($distFile);
     exit;
 }

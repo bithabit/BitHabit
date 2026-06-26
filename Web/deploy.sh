@@ -32,6 +32,14 @@ if ! grep -q 'src/main.ts' index.dev.html; then
     exit 1
 fi
 
+# 1.5. 备份 APK（Vite build 会清空 dist/）
+if [ -f app.apk ]; then
+    cp app.apk /tmp/bithabit-app.apk.backup
+fi
+
+# 1.6. 清理 dist/ 中的旧 APK（防止 nitron/build-twa 重建时嵌套套娃）
+rm -f dist/app.apk
+
 # 2. 构建 (Vite 读取 index.dev.html 作为入口)
 # ⚠️ 必须设置 NODE_ENV=development，否则 npm 跳过 devDependencies
 echo "🔨 构建前端..."
@@ -58,14 +66,34 @@ cp dist/sw.js . 2>/dev/null || true
 cp dist/registerSW.js . 2>/dev/null || true
 cp dist/workbox-*.js . 2>/dev/null || true
 
-# 6. 清理旧的 workbox 文件（避免累积）
+# 6. 恢复/复制 APK 安装包
+if [ -f /tmp/bithabit-app.apk.backup ]; then
+    cp /tmp/bithabit-app.apk.backup app.apk
+    cp /tmp/bithabit-app.apk.backup dist/app.apk
+    rm /tmp/bithabit-app.apk.backup
+    echo "📱 APK restored: $(du -h app.apk | cut -f1)"
+elif [ -f dist/app.apk ]; then
+    cp dist/app.apk .
+    echo "📱 APK: $(du -h app.apk | cut -f1)"
+else
+    echo "⚠️  No app.apk found (build APK separately with nitron)"
+fi
+
+# 6.5. 部署 .well-known/assetlinks.json (TWA 验证)
+if [ -d dist/.well-known ]; then
+    mkdir -p .well-known
+    cp dist/.well-known/assetlinks.json .well-known/ 2>/dev/null || true
+    echo "🔗 assetlinks.json deployed"
+fi
+
+# 7. 清理旧的 workbox 文件（避免累积）
 for old_wb in workbox-*.js; do
     if [ ! -f "dist/$old_wb" ]; then
         rm -f "$old_wb"
     fi
 done
 
-# 7. 输出清单（供验证）
+# 8. 输出清单（供验证）
 echo ""
 echo "📁 根目录 PWA 文件:"
 ls -la manifest.json sw.js registerSW.js workbox-*.js 2>/dev/null || echo "  (无)"
@@ -74,7 +102,7 @@ echo "📁 assets/ 内容 ($(find assets/ -type f | wc -l) 个文件):"
 ls -la assets/ | grep -v '^total' | head -20
 echo ""
 
-# 8. 快速验证
+# 9. 快速验证
 echo "✅ 部署完成！"
 echo "   前端控制器: index.php"
 echo "   生产入口: dist/index.html (由 index.php serve)"
