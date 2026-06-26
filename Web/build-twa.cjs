@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * BitHabit TWA APK 构建脚本 v2
+ * ⚠️ 已废弃！请使用 nitron 直接构建（见 TECH.md §6.2）
+ *
+ * 此脚本手动使用 aapt2 构建 APK，但产物不被 MIUI 接受（证书白名单问题）。
+ * 保留仅作参考。
+ *
+ * BitHabit TWA APK 构建脚本 v2 (DEPRECATED)
  */
 const { execSync, execFileSync } = require('child_process')
 const { mkdirSync, writeFileSync, copyFileSync, existsSync, readdirSync } = require('fs')
@@ -13,9 +18,11 @@ const AAPT2 = '/home/node/.nitron/android/aapt2'
 const ANDROID_JAR = '/home/node/.nitron/android/android.jar'
 const SIGNER_JAR = '/tmp/nitron-src/package/vendor/uber-apk-signer.jar'
 const BASE_APK = '/tmp/nitron-src/package/template/base.apk'
-const KEYSTORE = join(PROJECT_DIR, 'bithabit-release.keystore')
-const KEYSTORE_PASS = 'BitHabit2026!Secure'
-const KEY_ALIAS = 'bithabit'
+// 使用 Android Debug 签名（MIUI 等国产 ROM 只认标准 debug 证书白名单）
+const { homedir } = require('os')
+const KEYSTORE = join(homedir(), '.android', 'debug.keystore')
+const KEYSTORE_PASS = 'android'
+const KEY_ALIAS = 'androiddebugkey'
 const OUTPUT_APK = join(PROJECT_DIR, 'dist', 'app.apk')
 const OUTPUT_APK_ROOT = join(PROJECT_DIR, 'app.apk')
 
@@ -41,8 +48,8 @@ console.log('[2/5] 生成 AndroidManifest.xml...')
 writeFileSync(join(workDir, 'AndroidManifest.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.bithabit.app"
-    android:versionCode="10000"
-    android:versionName="1.0.0">
+    android:versionCode="10001"
+    android:versionName="1.0.1">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -53,11 +60,7 @@ writeFileSync(join(workDir, 'AndroidManifest.xml'), `<?xml version="1.0" encodin
         android:roundIcon="@mipmap/ic_launcher"
         android:hardwareAccelerated="true"
         android:usesCleartextTraffic="true">
-
-        <meta-data
-            android:name="asset_statements"
-            android:resource="@string/asset_statements" />
-
+        
         <activity
             android:name="com.nicron.webview.MainActivity"
             android:exported="true"
@@ -76,7 +79,6 @@ mkdirSync(join(resDir, 'values'), { recursive: true })
 writeFileSync(join(resDir, 'values', 'strings.xml'), `<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">BitHabit</string>
-    <string name="asset_statements">[{"include":"https://bithabit.dpdns.org/.well-known/assetlinks.json"}]</string>
 </resources>`)
 
 writeFileSync(join(resDir, 'values', 'colors.xml'), `<?xml version="1.0" encoding="utf-8"?>
@@ -118,15 +120,42 @@ print('done')
 }
 
 if (!hasOldApk) {
-  // 旧 APK 不可用，生成最小化 PNG 图标（纯色 1x1 像素）
-  console.log('  旧 APK 不可用，生成占位图标')
-  const ICON_DIRS = ['mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi']
-  // 最小的有效 PNG: 1x1 蓝色像素
-  const minPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==', 'base64')
-  for (const d of ICON_DIRS) {
-    mkdirSync(join(resDir, d), { recursive: true })
-    writeFileSync(join(resDir, d, 'ic_launcher.png'), minPng)
-    writeFileSync(join(resDir, d, 'ic_launcher_foreground.png'), minPng)
+  // 使用 dist/assets/icons/ 中的 PWA 图标作为启动图标
+  console.log('  使用 PWA 图标作为启动图标')
+  const icon512 = join(PROJECT_DIR, 'dist', 'assets', 'icons', 'icon-512.png')
+  const icon192 = join(PROJECT_DIR, 'dist', 'assets', 'icons', 'icon-192.png')
+  if (existsSync(icon512) && existsSync(icon192)) {
+    const { readFileSync } = require('fs')
+    const png512 = readFileSync(icon512)
+    const png192 = readFileSync(icon192)
+    // 按密度使用对应图标（512 用于高密度，192 用于低密度）
+    mkdirSync(join(resDir, 'mipmap-xxxhdpi'), { recursive: true })
+    mkdirSync(join(resDir, 'mipmap-xxhdpi'), { recursive: true })
+    mkdirSync(join(resDir, 'mipmap-xhdpi'), { recursive: true })
+    mkdirSync(join(resDir, 'mipmap-hdpi'), { recursive: true })
+    mkdirSync(join(resDir, 'mipmap-mdpi'), { recursive: true })
+    writeFileSync(join(resDir, 'mipmap-xxxhdpi', 'ic_launcher.png'), png512)
+    writeFileSync(join(resDir, 'mipmap-xxxhdpi', 'ic_launcher_foreground.png'), png512)
+    writeFileSync(join(resDir, 'mipmap-xxhdpi', 'ic_launcher.png'), png512)
+    writeFileSync(join(resDir, 'mipmap-xxhdpi', 'ic_launcher_foreground.png'), png512)
+    writeFileSync(join(resDir, 'mipmap-xhdpi', 'ic_launcher.png'), png192)
+    writeFileSync(join(resDir, 'mipmap-xhdpi', 'ic_launcher_foreground.png'), png192)
+    writeFileSync(join(resDir, 'mipmap-hdpi', 'ic_launcher.png'), png192)
+    writeFileSync(join(resDir, 'mipmap-hdpi', 'ic_launcher_foreground.png'), png192)
+    writeFileSync(join(resDir, 'mipmap-mdpi', 'ic_launcher.png'), png192)
+    writeFileSync(join(resDir, 'mipmap-mdpi', 'ic_launcher_foreground.png'), png192)
+  } else {
+    // 图标缺失，生成最小化占位
+    console.log('  PWA 图标不存在，生成 192x192 纯色图标')
+    const { createCanvas } = require('canvas')  // 尝试用 canvas
+    // 降级：用纯色 buffer
+    const ICON_DIRS = ['mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi']
+    const minPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==', 'base64')
+    for (const d of ICON_DIRS) {
+      mkdirSync(join(resDir, d), { recursive: true })
+      writeFileSync(join(resDir, d, 'ic_launcher.png'), minPng)
+      writeFileSync(join(resDir, d, 'ic_launcher_foreground.png'), minPng)
+    }
   }
 }
 
@@ -141,19 +170,31 @@ writeFileSync(join(resDir, 'mipmap-anydpi-v26', 'ic_launcher.xml'), `<?xml versi
 // === Step 4: aapt2 构建 ===
 console.log('[4/5] aapt2 compile → link...')
 
+// 复制 dist/ 资源（离线回退 + 让 APK 大小正常，避免安全软件拦截）
 console.log('  复制 PWA assets...')
 execSync(`cp -r "${PROJECT_DIR}/dist/"* "${assetsDir}/" 2>/dev/null; true`)
 if (existsSync(join(PROJECT_DIR, 'public'))) {
   execSync(`cp -r "${PROJECT_DIR}/public/"* "${assetsDir}/" 2>/dev/null; true`)
 }
+// 删除嵌套 APK
+const nestedApk = join(assetsDir, 'app.apk')
+if (existsSync(nestedApk)) require('fs').unlinkSync(nestedApk)
 
-// 修复 HTML 绝对路径 → 相对路径（WebView 从 file:// 加载）
-console.log('  修复 HTML 路径...')
-const { readFileSync } = require('fs')
-let indexHtml = readFileSync(join(assetsDir, 'index.html'), 'utf-8')
-// 将 src="/... 和 href="/... 等绝对路径改为相对路径
-indexHtml = indexHtml.replace(/((?:src|href|content)=")\/([^"]+)/g, '$1./$2')
-writeFileSync(join(assetsDir, 'index.html'), indexHtml)
+// 替换 index.html 为重定向页面（WebView 加载线上 HTTPS，避免 ES Module 在 file:// 下的 CORS 白屏）
+console.log('  创建重定向页面...')
+writeFileSync(join(assetsDir, 'index.html'), `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BitHabit</title>
+  <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#4F46E5;color:#fff}</style>
+</head>
+<body>
+  <p>正在加载 BitHabit...</p>
+  <script>window.location.replace('https://bithabit.dpdns.org')</script>
+</body>
+</html>`)
 
 // classes.dex
 writeFileSync(join(workDir, 'extract_dex.py'), `

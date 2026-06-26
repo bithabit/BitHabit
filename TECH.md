@@ -158,7 +158,137 @@ $conn = mysqli_connect("localhost", "Openclaw", "vK3*eR7/", "BitHabit", null, "/
 
 ---
 
-## 六、待讨论
+## 六、APK / TWA 构建
+
+### 6.1 概述
+
+BitHabit 提供两种安装方式：
+1. **PWA 添加到主屏幕**：浏览器打开 → 添加到主屏幕 → 全屏体验
+2. **APK 安装**：下载 APK 直接安装（解决 PWA 在国内浏览器支持差的问题）
+
+APK 基于 nitron 工具构建，使用 Android WebView 加载应用。
+
+### 6.2 构建流程
+
+```bash
+# 1. 确保 index.html（重定向页）存在于项目根目录
+# 2. 确保 app.js（nitron 配置）存在
+# 3. 移除旧的 app.apk（防止嵌套打包）
+rm -f app.apk dist/app.apk
+
+# 4. 运行 nitron 构建（使用 uber-apk-signer 内置 Debug 证书）
+JAVA_HOME=/home/node/tools/jre21/jdk-21.0.11+10-jre \
+PATH=$JAVA_HOME/bin:$PATH \
+node /path/to/nitron/dist/cli.js build -p /home/node/data/BitHabit/Web
+
+# 5. 复制输出
+cp dist/app.apk app.apk
+```
+
+### 6.3 app.js 配置
+
+```js
+import { app } from 'nitron'
+
+app.init({
+  name: 'BitHabit',
+  packageId: 'com.bithabit.app',
+  version: '1.0.1',
+  entry: 'index.html',
+  orientation: 'portrait',
+  permissions: ['INTERNET'],
+  icon: 'dist/assets/icons/icon-512.png',
+})
+```
+
+### 6.4 关键设计：重定向启动页
+
+APK 中的 `index.html` 是一个轻量重定向页面，打开后立即跳转到线上 HTTPS 地址：
+
+```html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BitHabit</title>
+  <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#4F46E5;color:#fff}</style>
+</head>
+<body>
+  <p>正在加载 BitHabit...</p>
+  <script>window.location.replace('https://bithabit.dpdns.org')</script>
+</body>
+</html>
+```
+
+**为什么不直接打包 dist/ 文件？**
+- Vite 构建产出是 ES Module（`<script type="module">`）
+- Android WebView 加载 `file://` 时，CORS 策略**禁止执行 ES Module**
+- 导致 JS 完全不运行 → 白屏
+- 解决：跳转到线上 HTTPS，WebView 正常加载
+
+### 6.5 下载接口
+
+```php
+// download-app.php — 独立于 index.php
+// 强制 no-cache，解决 Cloudflare 缓存旧版 APK 的问题
+header('Content-Type: application/vnd.android.package-archive');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+readfile(__DIR__ . '/dist/app.apk');
+```
+
+> ⚠️ 不要用 `/app.apk` 直链——Cloudflare 会缓存（cf-cache-status: HIT），用户下载到旧版。
+> 始终用 `/download-app.php`（cf-cache-status: DYNAMIC）。
+
+---
+
+## 七、已知踩坑记录
+
+### 7.1 ES Module + file:// 白屏
+
+| 项 | 详情 |
+|----|------|
+| 现象 | APK 安装成功，打开后白屏（无任何内容） |
+| 根因 | WebView 加载 `file:///android_asset/index.html`，HTML 中的 `<script type="module">` 被 CORS 策略阻止执行 |
+| 修复 | APK 内 index.html 改为重定向页，跳转到线上 HTTPS 地址 |
+| 影响 | 需要网络连接才能使用（可接受，PWA 本身就需要联网加载） |
+
+### 7.2 MIUI 证书白名单
+
+| 项 | 详情 |
+|----|------|
+| 现象 | 国产手机（MIUI）安装 APK 时报「不兼容」 |
+| 根因 | MIUI 对 APK 签名证书有白名单机制，只认标准 Debug 证书 |
+| 关键发现 | uber-apk-signer 内置的 Debug 证书（`CN=Android Debug, OU=Android, O=US...`）在白名单内 |
+| 修复 | 必须使用 **uber-apk-signer 的默认 Debug 签名**，不能用 keytool 手动生成的证书 |
+| 教训 | 不要自己生成 keystore，让 uber-apk-signer 自动签名即可 |
+
+### 7.3 APK 嵌套打包
+
+| 项 | 详情 |
+|----|------|
+| 现象 | APK 内部 `assets/app.apk` 包含旧版 APK |
+| 根因 | 构建时项目根目录有 `app.apk`，被 nitron 当作项目文件打包进去 |
+| 修复 | 构建前 `rm -f app.apk dist/app.apk` |
+
+### 7.4 Cloudflare 缓存旧版 APK
+
+| 项 | 详情 |
+|----|------|
+| 现象 | `/app.apk` 直链下载到旧版本 |
+| 根因 | Cloudflare 缓存了旧响应（cf-cache-status: HIT） |
+| 修复 | 用 `download-app.php` 提供下载（强制 no-cache），不要依赖 `/app.apk` 直链 |
+
+### 7.5 build-twa.cjs 不可用
+
+`build-twa.cjs` 是手动 APK 构建脚本，已废弃。问题：
+- 生成的 APK 结构不被 MIUI 接受
+- 签名证书不是 uber-apk-signer 原生的
+- 请直接使用 nitron 构建（见 6.2）
+
+---
+
+## 八、待讨论
 
 - [ ] UI 组件库选择（自研 / Tailwind / Vant）
 - [ ] 代码仓库

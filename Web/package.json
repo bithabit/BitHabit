@@ -3,13 +3,6 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "nitron": {
-    "packageId": "com.bithabit.app",
-    "entry": "dist/index.html",
-    "orientation": "portrait",
-    "statusBar": true,
-    "permissions": []
-  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",

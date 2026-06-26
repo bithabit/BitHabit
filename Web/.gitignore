@@ -9,10 +9,7 @@ manifest.webmanifest
 sw.js
 registerSW.js
 workbox-*.js
-
-# Release keystore (安全凭据，禁止提交)
-*.keystore
-nitron-release.keystore
 app.apk
-dist/app.apk
-BitHabit.apk
+bithabit-release.keystore
+nitron-release.keystore
+index.html
