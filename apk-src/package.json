@@ -1,0 +1,8 @@
+{
+  "name": "bithabit-apk",
+  "version": "1.0.1",
+  "private": true,
+  "dependencies": {
+    "nitron": "^1.3.0"
+  }
+}
