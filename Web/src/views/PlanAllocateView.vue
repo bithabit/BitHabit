@@ -5,57 +5,10 @@
       <h2>{{ stepTitle }}</h2>
     </header>
 
-    <!-- ========== Step 1: 总览 & 优先级排序 ========== -->
+    <!-- ========== Step 1: 分配策略 (合并折线图+节奏+排序) ========== -->
     <template v-if="step === 1">
-      <!-- 预计完成日期 -->
-      <section class="completion-card" v-if="planDates.length > 0">
-        <div class="completion-row">
-          <span class="completion-label">📅 预计</span>
-          <span class="completion-date">{{ formatDate(targetEndDateActual) }}</span>
-          <span class="completion-suffix">完成全部作业</span>
-        </div>
-        <div class="completion-slider-row">
-          <span class="completion-range">{{ planDates[0] }}</span>
-          <input type="range" :min="0" :max="planDates.length - 1" v-model.number="targetEndIdx"
-                 @input="debouncedPreview" class="completion-range-input" />
-          <span class="completion-range">{{ planDates[planDates.length - 1] }}</span>
-        </div>
-      </section>
-
-      <!-- 作业优先级排序列表 -->
-      <section class="sort-section">
-        <h3>📋 作业优先级 <span class="hint">（拖拽排序，排上方先安排）</span></h3>
-        <div class="sort-list">
-          <div v-for="(hw, i) in sortedHomework" :key="hw.id"
-               class="sort-item"
-               :class="{ dragging: dragIndex === i, over: dragOverIndex === i }"
-               draggable="true"
-               @dragstart="onDragStart(i, $event)"
-               @dragover.prevent="onDragOver(i)"
-               @dragend="onDragEnd">
-            <span class="drag-handle">☰</span>
-            <div class="sort-info">
-              <span class="sort-name">{{ subjectIcon(hw.subject) }} {{ hw.subject }} · {{ hw.taskType }}</span>
-              <span class="sort-amount">{{ fmt(hw.totalAmount) }}{{ hw.unit }} · {{ hw.totalAmount * (hw.timePerUnit || 60) }}分</span>
-            </div>
-            <div class="sort-meta">
-              {{ hw.rangeStr ? '📅 ' + hw.rangeStr : '⏳ 拖拽后预览…' }}
-              <span v-if="hw.autoInterval > 0"> · 隔{{ hw.autoInterval }}天一次</span>
-            </div>
-          </div>
-          <div v-if="sortedHomework.length === 0" class="sort-empty">暂无作业数据</div>
-        </div>
-      </section>
-
-      <button class="btn-primary" :disabled="sortedHomework.length === 0" @click="goToStep2">
-        下一步：节奏与约束 →
-      </button>
-    </template>
-
-    <!-- ========== Step 2: 节奏 & 约束 ========== -->
-    <template v-if="step === 2">
       <!-- 折线图 -->
-      <section class="chart-card" ref="chartRef">
+      <section class="chart-card">
         <h3>📊 工作量预览</h3>
         <div class="chart-wrap">
           <svg :width="chartW" :height="chartH" class="chart-svg">
@@ -86,7 +39,29 @@
         </div>
       </section>
 
-      <!-- 节奏滑块 -->
+      <!-- 预计完成日期 + 每日上限 同栏 -->
+      <section class="combined-card" v-if="planDates.length > 0">
+        <div class="combined-row">
+          <div class="combined-field">
+            <span class="combined-label">📅 预计完成</span>
+            <div class="combined-slider-wrap">
+              <input type="range" :min="0" :max="planDates.length - 1" v-model.number="targetEndIdx"
+                     @input="debouncedPreview" class="completion-range-input" />
+              <span class="combined-val">{{ formatDate(targetEndDateActual) }}</span>
+            </div>
+          </div>
+          <div class="combined-divider"></div>
+          <div class="combined-field combined-cap">
+            <span class="combined-label">⏱ 每日上限</span>
+            <div class="cap-inline-wrap">
+              <input type="number" v-model.number="maxDailyMinutes" min="30" max="720" class="cap-input-sm" @input="debouncedPreview" />
+              <span class="combined-val-small">分钟</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 节奏 + 预设 -->
       <section class="slider-card">
         <h3>🎚 节奏偏好</h3>
         <div class="slider-row">
@@ -96,15 +71,6 @@
         </div>
         <div class="preset-row">
           <button v-for="p in presets" :key="p.val" class="preset-btn" :class="{ active: rhythm === p.val }" @click="rhythm = p.val; debouncedPreview()">{{ p.label }}</button>
-        </div>
-      </section>
-
-      <!-- 每日上限 -->
-      <section class="cap-card">
-        <h3>⏱ 每日作业上限</h3>
-        <div class="cap-input-row">
-          <input type="number" v-model.number="maxDailyMinutes" min="30" max="720" class="cap-input" @input="debouncedPreview" />
-          <span class="cap-unit">分钟</span>
         </div>
       </section>
 
@@ -118,18 +84,40 @@
         </div>
       </section>
 
-      <div class="action-row">
-        <button class="btn-outline" @click="step = 1">← 返回总览</button>
-        <button class="btn-primary" :disabled="!preview" @click="step = 3">
-          下一步：逐项调整 →
-        </button>
-      </div>
+      <!-- 拖拽排序列表 -->
+      <section class="sort-section">
+        <h3>📋 作业优先级 <span class="hint">（排上方先安排）</span></h3>
+        <div class="sort-list">
+          <div v-for="(hw, i) in sortedHomework" :key="hw.id"
+               class="sort-item sort-item-compact"
+               :class="{ dragging: dragIndex === i, over: dragOverIndex === i }"
+               draggable="true"
+               @dragstart="onDragStart(i, $event)"
+               @dragover.prevent="onDragOver(i)"
+               @dragend="onDragEnd">
+            <span class="drag-handle">☰</span>
+            <div class="sort-info">
+              <span class="sort-name">{{ subjectIcon(hw.subject) }} {{ hw.subject }} · {{ hw.taskType }}</span>
+              <span class="sort-amount">{{ fmt(hw.totalAmount) }}{{ hw.unit }} · {{ fmtHours((hw.totalAmount) * (hw.timePerUnit || 60)) }}</span>
+            </div>
+            <div class="sort-meta">
+              {{ hw.rangeStr ? '📅 ' + dateRangeShort(hw.rangeStr) : '⏳ 拖拽后预览…' }}
+              <span v-if="hw.autoInterval > 0"> · 隔{{ hw.autoInterval + 1 }}天一次</span>
+            </div>
+          </div>
+          <div v-if="sortedHomework.length === 0" class="sort-empty">暂无作业数据</div>
+        </div>
+      </section>
+
+      <button class="btn-primary" :disabled="sortedHomework.length === 0" @click="step = 2">
+        下一步：逐项调整 →
+      </button>
     </template>
 
-    <!-- ========== Step 3: 逐项调整 ========== -->
-    <template v-if="step === 3">
+    <!-- ========== Step 2: 逐项调整 ========== -->
+    <template v-if="step === 2">
       <!-- 缩小版折线图 -->
-      <section class="chart-card chart-mini" @click="step = 2" style="cursor:pointer">
+      <section class="chart-card chart-mini" @click="step = 1" style="cursor:pointer">
         <h3>📊 预览 <span class="hint">（点击返回调整节奏）</span></h3>
         <svg :width="200" :height="60" class="chart-svg">
           <rect v-for="(bar, i) in miniBars" :key="i"
@@ -184,7 +172,7 @@
       </section>
 
       <div class="action-row">
-        <button class="btn-outline" @click="step = 2">← 返回策略</button>
+        <button class="btn-outline" @click="step = 1">← 返回策略</button>
         <button class="btn-primary" @click="handleConfirm" :disabled="confirming">
           {{ confirming ? '生成中...' : '✅ 确认生成' }}
         </button>
@@ -204,8 +192,7 @@ const planId = computed(() => Number(route.params.id))
 
 const step = ref(1)
 const stepTitle = computed(() =>
-  step.value === 1 ? '分配策略 · 总览' :
-  step.value === 2 ? '分配策略 · 节奏与约束' :
+  step.value === 1 ? '分配策略' :
   '分配策略 · 逐项调整'
 )
 
@@ -400,6 +387,17 @@ const tsMinEnd = computed(() => {
 })
 
 // ======== Helpers ========
+function fmtHours(minutes: number): string {
+  const h = minutes / 60
+  return Number.isInteger(h) ? `${h}h` : `${h.toFixed(1)}h`
+}
+function dateRangeShort(range: string): string {
+  if (!range) return ''
+  return range.split(' ~ ').map(d => {
+    const m = d.split('-')
+    return `${parseInt(m[1])}/${parseInt(m[2])}`
+  }).join(' - ')
+}
 function subjectIcon(s: string): string {
   const m: Record<string,string> = {'数学':'📐','英语':'🇬🇧','语文':'📖','物理':'⚛️','化学':'🧪','生物':'🧬','历史':'📜','地理':'🌍','政治':'⚖️'}
   return m[s] || '📝'
@@ -508,16 +506,6 @@ function handleBack() {
   else step.value = 1
 }
 
-async function goToStep2() {
-  // Fetch first ranges if not available
-  if (sortedHomework.value.some(h => !h.rangeStr)) {
-    await fetchRanges()
-  }
-  // Refresh preview for chart display
-  await refreshPreview()
-  step.value = 2
-}
-
 // ======== Init ========
 onMounted(async () => {
   // Fetch plan detail
@@ -579,20 +567,24 @@ onMounted(async () => {
 .page-header h2 { font-size: 1.125rem; font-weight: 700; color: var(--color-text); }
 .btn-back { padding: 6px 12px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-card); color: var(--color-text-secondary); font-size: 0.875rem; cursor: pointer; font-family: var(--font-family); }
 
-/* Step 1: completion card */
-.completion-card { background: var(--color-card); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; }
-.completion-row { display: flex; align-items: center; gap: 6px; font-size: 0.875rem; color: var(--color-text); margin-bottom: 8px; }
-.completion-label { white-space: nowrap; }
-.completion-date { font-weight: 700; color: var(--color-primary); }
-.completion-suffix { color: var(--color-text-secondary); }
-.completion-slider-row { display: flex; align-items: center; gap: 8px; }
-.completion-range { font-size: 0.6875rem; color: var(--color-text-placeholder); white-space: nowrap; }
-.completion-range-input { flex: 1; accent-color: var(--color-primary); }
+/* Step 1: combined completion + cap card */
+.combined-card { background: var(--color-card); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.combined-row { display: flex; align-items: center; gap: 12px; }
+.combined-field { flex: 1; min-width: 0; }
+.combined-field .combined-label { display: block; font-size: 0.8125rem; color: var(--color-text-secondary); margin-bottom: 4px; }
+.combined-slider-wrap { display: flex; align-items: center; gap: 6px; }
+.combined-slider-wrap input[type="range"] { flex: 1; accent-color: var(--color-primary); }
+.combined-val { font-size: 0.8125rem; font-weight: 600; color: var(--color-primary); white-space: nowrap; min-width: 44px; text-align: right; }
+.combined-divider { width: 1px; height: 36px; background: var(--color-border); flex-shrink: 0; }
+.combined-cap .cap-inline-wrap { display: flex; align-items: center; gap: 4px; }
+.cap-input-sm { width: 64px; padding: 4px 6px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); font-size: 0.875rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); text-align: center; }
+.combined-val-small { font-size: 0.75rem; color: var(--color-text-placeholder); }
 
-/* Step 1: sort list */
+/* Step 1: sort list compact */
 .sort-section h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; color: var(--color-text); }
 .sort-section .hint { font-weight: 400; font-size: 0.75rem; color: var(--color-text-placeholder); }
 .sort-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.sort-item-compact { padding: 10px 12px; }
 .sort-item {
   display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
   padding: 12px 14px;
@@ -612,9 +604,12 @@ onMounted(async () => {
   width: 100%; font-size: 0.75rem; color: var(--color-text-placeholder);
   padding-left: 28px;
 }
+.sort-item-compact .sort-name { font-size: 0.8125rem; }
+.sort-item-compact .sort-amount { font-size: 0.6875rem; }
+.sort-item-compact .sort-meta { font-size: 0.6875rem; }
 .sort-empty { text-align: center; padding: 24px; color: var(--color-text-placeholder); font-size: 0.875rem; }
 
-/* Step 2: chart */
+/* Chart card */
 .chart-card, .slider-card, .cap-card, .stats-card { background: var(--color-card); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 .chart-card h3, .slider-card h3, .cap-card h3, .stats-card h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; color: var(--color-text); }
 .chart-wrap { overflow-x: auto; }
