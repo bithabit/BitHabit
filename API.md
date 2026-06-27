@@ -229,6 +229,53 @@ Response (200):
 - 查 `plan_tasks` JOIN `homework`
 - 需验证 plan 属于当前用户
 
+### 1.12 移动任务到指定日期
+
+```
+PATCH /api/plans/tasks/move.php
+Authorization: Bearer <token>
+
+Request: { "id": 42, "targetDate": "2026-07-16" }
+Response (200): { "id": 42, "date": "2026-07-16" }
+```
+
+- 验证 task 属于当前用户
+- `sort_order` 变为目标日最大值+1（放末尾）
+
+### 1.13 批量重排任务
+
+```
+PATCH /api/plans/tasks/reorder.php
+Authorization: Bearer <token>
+
+Request: { "date": "2026-07-15", "order": [42, 45, 43, 44] }
+Response (200): { "updated": 4 }
+```
+
+- 验证所有 task 属于当前用户
+- `sort_order` = 数组索引
+
+### 1.14 编辑任务
+
+```
+PATCH /api/plans/tasks/update.php
+Authorization: Bearer <token>
+
+Request: { "id": 42, "amount": 1, "estimatedMinutes": 90 }
+Response (200): { "id": 42, "amount": 1, "estimatedMinutes": 90 }
+```
+
+- 部分更新，字段：`amount`, `estimatedMinutes`
+
+### 1.15 撤销移动
+
+```
+PATCH /api/plans/tasks/undo-move.php
+Authorization: Bearer <token>
+
+Request: { "id": 42, "originalDate": "2026-07-15", "originalOrder": 2 }
+Response (200): { "id": 42, "date": "2026-07-15" }
+
 ---
 
 ## 模块〇：日程配置 API

@@ -1,11 +1,11 @@
 <?php
 /**
- * BitHabit - 作业 CRUD
+ * BitHabit - 作业 CRUD (v2)
  *
- * GET    /api/homework.php          → 列出当前用户所有作业
- * POST   /api/homework.php          → 添加单条作业
- * PATCH  /api/homework.php?id=X     → 编辑作业
- * DELETE /api/homework.php?id=X     → 删除作业
+ * GET    /api/homework.php?plan_id=X     → 列出某计划所有作业
+ * POST   /api/homework.php               → 添加作业（必填 plan_id）
+ * PATCH  /api/homework.php?id=X          → 编辑作业
+ * DELETE /api/homework.php?id=X          → 删除作业
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -18,7 +18,6 @@ $userId = (int)$user['user_id'];
 $method = $_SERVER['REQUEST_METHOD'];
 $conn = getDbConnection();
 
-// 默认耗时：不填则按 60 分钟（1 小时）计
 $defaultTimePerUnit = [
     '练习册' => 10,
     '模拟卷' => 90,
@@ -28,34 +27,42 @@ $defaultTimePerUnit = [
     '读后感' => 60,
     '背诵' => 20,
 ];
-const DEFAULT_TIME_PER_UNIT = 60; // 兜底：1 小时
+const DEFAULT_TIME_PER_UNIT = 60;
 
-// --- GET: 列出作业（含进度信息） ---
+// --- GET: 列出某计划的所有作业（含进度信息） ---
 if ($method === 'GET') {
+    $planId = (int)($_GET['plan_id'] ?? 0);
+    if ($planId <= 0) {
+        http_response_code(400);
+        echo json_encode(['error' => '缺少 plan_id 参数', 'code' => 'INVALID_INPUT']);
+        exit;
+    }
+
+    // 校验计划归属
+    $planCheck = $conn->prepare('SELECT id FROM plans WHERE id = ? AND user_id = ?');
+    $planCheck->bind_param('ii', $planId, $userId);
+    $planCheck->execute();
+    if ($planCheck->get_result()->num_rows === 0) {
+        http_response_code(404);
+        echo json_encode(['error' => '计划不存在', 'code' => 'NOT_FOUND']);
+        exit;
+    }
+
     $sql = '
         SELECT h.id, h.subject, h.task_type, h.total_amount, h.unit, h.time_per_unit, h.notes, h.created_at,
-               COALESCE(c.completed_amount, 0) AS completed_amount,
-               CASE WHEN p.homework_id IS NOT NULL THEN 1 ELSE 0 END AS in_plan,
-               COALESCE(p.plan_names, \'\') AS plan_names
+               COALESCE(c.completed_amount, 0) AS completed_amount
         FROM homework h
         LEFT JOIN (
             SELECT homework_id, SUM(amount) AS completed_amount
-            FROM plan_tasks
-            WHERE completed = 1
+            FROM plan_tasks WHERE completed = 1
             GROUP BY homework_id
         ) c ON c.homework_id = h.id
-        LEFT JOIN (
-            SELECT pt.homework_id, GROUP_CONCAT(DISTINCT pl.name SEPARATOR \'|\') AS plan_names
-            FROM plan_tasks pt
-            JOIN plans pl ON pl.id = pt.plan_id
-            GROUP BY pt.homework_id
-        ) p ON p.homework_id = h.id
-        WHERE h.user_id = ?
+        WHERE h.user_id = ? AND h.plan_id = ?
         ORDER BY h.created_at DESC
     ';
 
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param('i', $userId);
+    $stmt->bind_param('ii', $userId, $planId);
     $stmt->execute();
     $result = $stmt->get_result();
 
@@ -65,10 +72,6 @@ if ($method === 'GET') {
         $row['total_amount'] = (float)$row['total_amount'];
         $row['completed_amount'] = (float)$row['completed_amount'];
         $row['time_per_unit'] = $row['time_per_unit'] !== null ? (int)$row['time_per_unit'] : null;
-        $row['in_plan'] = (bool)(int)$row['in_plan'];
-        $row['plan_names'] = empty($row['plan_names'])
-            ? []
-            : explode('|', trim($row['plan_names']));
         $homework[] = $row;
     }
 
@@ -76,10 +79,11 @@ if ($method === 'GET') {
     exit;
 }
 
-// --- POST: 添加作业 ---
+// --- POST: 添加作业（必填 plan_id） ---
 if ($method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
 
+    $planId = (int)($input['planId'] ?? $input['plan_id'] ?? 0);
     $subject = trim($input['subject'] ?? '');
     $taskType = trim($input['type'] ?? $input['task_type'] ?? '');
     $totalAmount = $input['totalAmount'] ?? $input['total_amount'] ?? null;
@@ -87,10 +91,19 @@ if ($method === 'POST') {
     $timePerUnit = $input['timePerUnit'] ?? $input['time_per_unit'] ?? null;
     $notes = trim($input['notes'] ?? '');
 
-    // 校验
-    if (empty($subject) || empty($taskType) || $totalAmount === null || $totalAmount === '' || empty($unit)) {
+    if ($planId <= 0 || empty($subject) || empty($taskType) || $totalAmount === null || $totalAmount === '' || empty($unit)) {
         http_response_code(400);
-        echo json_encode(['error' => '科目、类型、总量、单位均为必填', 'code' => 'INVALID_INPUT']);
+        echo json_encode(['error' => 'plan_id、科目、类型、总量、单位均为必填', 'code' => 'INVALID_INPUT']);
+        exit;
+    }
+
+    // 校验计划归属
+    $planCheck = $conn->prepare('SELECT id FROM plans WHERE id = ? AND user_id = ?');
+    $planCheck->bind_param('ii', $planId, $userId);
+    $planCheck->execute();
+    if ($planCheck->get_result()->num_rows === 0) {
+        http_response_code(404);
+        echo json_encode(['error' => '计划不存在', 'code' => 'NOT_FOUND']);
         exit;
     }
 
@@ -101,26 +114,17 @@ if ($method === 'POST') {
         exit;
     }
 
-    // 未填耗时则用默认值（优先按类型匹配，否则默认 60 分钟 = 1 小时）
     if ($timePerUnit === null || $timePerUnit === '' || $timePerUnit === 0) {
         $timePerUnit = $defaultTimePerUnit[$taskType] ?? DEFAULT_TIME_PER_UNIT;
     } else {
         $timePerUnit = (int)$timePerUnit;
     }
 
-    if ($timePerUnit === null) {
-        $stmt = $conn->prepare(
-            'INSERT INTO homework (user_id, subject, task_type, total_amount, unit, time_per_unit, notes) 
-             VALUES (?, ?, ?, ?, ?, NULL, ?)'
-        );
-        $stmt->bind_param('issdss', $userId, $subject, $taskType, $totalAmount, $unit, $notes);
-    } else {
-        $stmt = $conn->prepare(
-            'INSERT INTO homework (user_id, subject, task_type, total_amount, unit, time_per_unit, notes) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        );
-        $stmt->bind_param('issdsis', $userId, $subject, $taskType, $totalAmount, $unit, $timePerUnit, $notes);
-    }
+    $stmt = $conn->prepare(
+        'INSERT INTO homework (user_id, plan_id, subject, task_type, total_amount, unit, time_per_unit, notes) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $stmt->bind_param('iissdiss', $userId, $planId, $subject, $taskType, $totalAmount, $unit, $timePerUnit, $notes);
 
     if ($stmt->execute()) {
         http_response_code(201);
@@ -144,7 +148,6 @@ if ($method === 'PATCH' || $method === 'PUT') {
         exit;
     }
 
-    // 检查所有权
     $stmt = $conn->prepare('SELECT id FROM homework WHERE id = ? AND user_id = ?');
     $stmt->bind_param('ii', $id, $userId);
     $stmt->execute();
@@ -222,6 +225,10 @@ if ($method === 'DELETE') {
     $stmt->bind_param('ii', $id, $userId);
 
     if ($stmt->execute() && $stmt->affected_rows > 0) {
+        // 级联删除关联的 plan_tasks
+        $taskDel = $conn->prepare('DELETE FROM plan_tasks WHERE homework_id = ?');
+        $taskDel->bind_param('i', $id);
+        $taskDel->execute();
         echo json_encode(['deleted' => true], JSON_UNESCAPED_UNICODE);
     } else {
         http_response_code(404);

@@ -1,9 +1,9 @@
 <?php
 /**
- * BitHabit - 今日任务
+ * BitHabit - 今日任务 (v2)
  *
  * GET /api/plans/today.php
- * 返回当前用户最新计划中今天的任务列表
+ * 返回当前用户所有活跃计划的今日任务，按计划分组
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -23,57 +23,61 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 $conn = getDbConnection();
 $today = date('Y-m-d');
 
-// 1. 取用户最新计划
+// 查询所有活跃计划（进行中且未过期）
 $stmt = $conn->prepare(
-    'SELECT id, name FROM plans WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+    'SELECT id, name FROM plans 
+     WHERE user_id = ? AND start_date <= ? AND end_date >= ?
+     ORDER BY created_at DESC'
 );
-$stmt->bind_param('i', $userId);
+$stmt->bind_param('iss', $userId, $today, $today);
 $stmt->execute();
-$planResult = $stmt->get_result();
+$plansResult = $stmt->get_result();
 
-if ($planResult->num_rows === 0) {
-    // 无计划
-    echo json_encode([
-        'planId' => null,
-        'planName' => null,
-        'date' => $today,
-        'tasks' => [],
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
+$plans = [];
+$totalTasks = 0;
+$totalMinutes = 0;
 
-$plan = $planResult->fetch_assoc();
-$planId = (int)$plan['id'];
+while ($plan = $plansResult->fetch_assoc()) {
+    $planId = (int)$plan['id'];
 
-// 2. 查今天的任务
-$stmt = $conn->prepare(
-    'SELECT pt.id, pt.amount, pt.estimated_minutes, pt.completed, pt.completed_at,
-            h.subject, h.task_type, h.unit
-     FROM plan_tasks pt
-     JOIN homework h ON pt.homework_id = h.id
-     WHERE pt.plan_id = ? AND pt.date = ?
-     ORDER BY pt.sort_order'
-);
-$stmt->bind_param('is', $planId, $today);
-$stmt->execute();
-$tasksResult = $stmt->get_result();
+    // 查今天的任务
+    $taskStmt = $conn->prepare(
+        'SELECT pt.id, pt.amount, pt.estimated_minutes, pt.completed, pt.completed_at,
+                h.subject, h.task_type, h.unit
+         FROM plan_tasks pt
+         JOIN homework h ON pt.homework_id = h.id
+         WHERE pt.plan_id = ? AND pt.date = ?
+         ORDER BY pt.sort_order'
+    );
+    $taskStmt->bind_param('is', $planId, $today);
+    $taskStmt->execute();
+    $tasksResult = $taskStmt->get_result();
 
-$tasks = [];
-while ($task = $tasksResult->fetch_assoc()) {
-    $tasks[] = [
-        'id' => (int)$task['id'],
-        'subject' => $task['subject'],
-        'taskType' => $task['task_type'],
-        'amount' => (float)$task['amount'],
-        'unit' => $task['unit'],
-        'estimatedMinutes' => (int)$task['estimated_minutes'],
-        'completed' => (bool)$task['completed'],
+    $tasks = [];
+    while ($task = $tasksResult->fetch_assoc()) {
+        $tasks[] = [
+            'id' => (int)$task['id'],
+            'subject' => $task['subject'],
+            'taskType' => $task['task_type'],
+            'amount' => (float)$task['amount'],
+            'unit' => $task['unit'],
+            'estimatedMinutes' => (int)$task['estimated_minutes'],
+            'completed' => (bool)$task['completed'],
+        ];
+        $totalTasks++;
+        $totalMinutes += (int)$task['estimated_minutes'];
+    }
+
+    $plans[] = [
+        'planId' => $planId,
+        'planName' => $plan['name'],
+        'tasks' => $tasks,
     ];
 }
 
 echo json_encode([
-    'planId' => $planId,
-    'planName' => $plan['name'],
     'date' => $today,
-    'tasks' => $tasks,
+    'plans' => $plans,
+    'totalTasks' => $totalTasks,
+    'totalMinutes' => $totalMinutes,
 ], JSON_UNESCAPED_UNICODE);

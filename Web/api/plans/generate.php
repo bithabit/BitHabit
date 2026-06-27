@@ -32,12 +32,32 @@ $input = json_decode(file_get_contents('php://input'), true);
 $conn = getDbConnection();
 
 // --- 参数解析 & 校验 ---
+$planId = (int)($input['planId'] ?? $input['plan_id'] ?? 0);
 $planName = trim($input['name'] ?? '暑假作业计划');
 $startDate = $input['startDate'] ?? $input['start_date'] ?? '';
 $endDate = $input['endDate'] ?? $input['end_date'] ?? '';
 $dailyStartTime = $input['dailyStartTime'] ?? $input['daily_start_time'] ?? '08:00:00';
 $dailyEndTime = $input['dailyEndTime'] ?? $input['daily_end_time'] ?? '22:00:00';
 $strategy = $input['strategy'] ?? 'average';
+
+// 如果传了 plan_id，验证归属并从计划获取日期
+if ($planId > 0) {
+    $planStmt = $conn->prepare('SELECT id, name, start_date, end_date, daily_start_time, daily_end_time FROM plans WHERE id = ? AND user_id = ?');
+    $planStmt->bind_param('ii', $planId, $userId);
+    $planStmt->execute();
+    $planRow = $planStmt->get_result()->fetch_assoc();
+    if (!$planRow) {
+        http_response_code(404);
+        echo json_encode(['error' => '计划不存在', 'code' => 'NOT_FOUND']);
+        exit;
+    }
+    $planName = $planRow['name'];
+    // 如果用户没传日期，用计划定义的日期
+    if (empty($startDate)) $startDate = $planRow['start_date'];
+    if (empty($endDate)) $endDate = $planRow['end_date'];
+    if ($dailyStartTime === '08:00:00' && $planRow['daily_start_time'] !== '08:00:00') $dailyStartTime = $planRow['daily_start_time'];
+    if ($dailyEndTime === '22:00:00' && $planRow['daily_end_time'] !== '22:00:00') $dailyEndTime = $planRow['daily_end_time'];
+}
 
 if (empty($startDate) || empty($endDate)) {
     http_response_code(400);
@@ -55,11 +75,15 @@ if (!$startTs || !$endTs || $startTs > $endTs) {
 }
 
 // --- 1. 获取作业列表 ---
-$stmt = $conn->prepare(
-    'SELECT id, subject, task_type, total_amount, unit, time_per_unit 
-     FROM homework WHERE user_id = ? ORDER BY subject'
-);
-$stmt->bind_param('i', $userId);
+$homeworkQuery = $planId > 0
+    ? 'SELECT id, subject, task_type, total_amount, unit, time_per_unit FROM homework WHERE user_id = ? AND plan_id = ? ORDER BY subject'
+    : 'SELECT id, subject, task_type, total_amount, unit, time_per_unit FROM homework WHERE user_id = ? ORDER BY subject';
+$stmt = $conn->prepare($homeworkQuery);
+if ($planId > 0) {
+    $stmt->bind_param('ii', $userId, $planId);
+} else {
+    $stmt->bind_param('i', $userId);
+}
 $stmt->execute();
 $homeworkResult = $stmt->get_result();
 
@@ -324,13 +348,22 @@ unset($day);
 $conn->begin_transaction();
 
 try {
-    $stmt = $conn->prepare(
-        'INSERT INTO plans (user_id, name, start_date, end_date, daily_start_time, daily_end_time, strategy) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)'
-    );
-    $stmt->bind_param('issssss', $userId, $planName, $startDate, $endDate, $dailyStartTime, $dailyEndTime, $strategy);
-    $stmt->execute();
-    $planId = $stmt->insert_id;
+    if ($planId <= 0) {
+        // 新建计划
+        $stmt = $conn->prepare(
+            'INSERT INTO plans (user_id, name, start_date, end_date, daily_start_time, daily_end_time, strategy) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->bind_param('issssss', $userId, $planName, $startDate, $endDate, $dailyStartTime, $dailyEndTime, $strategy);
+        $stmt->execute();
+        $planId = $stmt->insert_id;
+    }
+    // 如果是已有 plan，先清空该计划的旧 plan_tasks（重新生成）
+    if ($planId > 0) {
+        $delStmt = $conn->prepare('DELETE FROM plan_tasks WHERE plan_id = ?');
+        $delStmt->bind_param('i', $planId);
+        $delStmt->execute();
+    }
 
     $taskStmt = $conn->prepare(
         'INSERT INTO plan_tasks (plan_id, homework_id, date, amount, estimated_minutes, sort_order) 

@@ -15,21 +15,15 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
-    path: '/homework',
-    name: 'homework',
-    component: () => import('../views/HomeworkView.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/schedule',
-    name: 'schedule',
-    component: () => import('../views/ScheduleView.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
     path: '/plan/create',
     name: 'planCreate',
     component: () => import('../views/PlanCreateView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/plan/:id',
+    name: 'planDetail',
+    component: () => import('../views/PlanDetailView.vue'),
     meta: { requiresAuth: true },
   },
   {
@@ -39,9 +33,9 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
-    path: '/plan/:id',
-    name: 'planDetail',
-    component: () => import('../views/PlanDetailView.vue'),
+    path: '/schedule',
+    name: 'schedule',
+    component: () => import('../views/ScheduleView.vue'),
     meta: { requiresAuth: true },
   },
   {
@@ -61,10 +55,8 @@ const router = createRouter({
   routes,
 })
 
-// 路由守卫
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('bithabit_token')
-
   if (!token && to.meta.requiresAuth) {
     next('/login')
   } else if (token && (to.path === '/login' || to.path === '/register')) {

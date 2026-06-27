@@ -1,5 +1,5 @@
 /**
- * BitHabit API 客户端
+ * BitHabit API 客户端 (v2)
  * 封装 fetch，自动携带 JWT Token
  */
 
@@ -85,21 +85,18 @@ export const authApi = {
   register(input: RegisterInput) {
     return request<AuthResponse>('POST', '/auth/register.php', input)
   },
-
   login(username: string, password: string) {
     return request<AuthResponse>('POST', '/auth/login.php', { username, password })
   },
-
   checkUsername(username: string) {
     return request<{ available: boolean }>('GET', `/auth/check.php?username=${encodeURIComponent(username)}`)
   },
-
   getMe() {
     return request<UserInfo>('GET', '/auth/me.php')
   },
 }
 
-// --- 作业相关 API ---
+// --- 作业相关 API (v2: 归属于计划) ---
 
 export interface HomeworkItem {
   id: number
@@ -110,13 +107,11 @@ export interface HomeworkItem {
   time_per_unit: number | null
   notes: string
   created_at: string
-  // 进度信息
   completed_amount: number
-  in_plan: boolean
-  plan_names: string[]
 }
 
 export interface HomeworkInput {
+  planId: number
   subject: string
   type: string
   totalAmount: number
@@ -126,8 +121,8 @@ export interface HomeworkInput {
 }
 
 export const homeworkApi = {
-  list() {
-    return request<{ homework: HomeworkItem[] }>('GET', '/homework.php')
+  list(planId: number) {
+    return request<{ homework: HomeworkItem[] }>('GET', `/homework.php?plan_id=${planId}`)
   },
   create(input: HomeworkInput) {
     return request<{ id: number; createdAt: string }>('POST', '/homework.php', input as unknown as Record<string, unknown>)
@@ -168,21 +163,10 @@ export const scheduleApi = {
   list() {
     return request<ScheduleData>('GET', '/schedule.php')
   },
-  addWeekly(input: {
-    dayOfWeek: number
-    startTime: string | null
-    endTime: string | null
-    label: string
-  }) {
+  addWeekly(input: { dayOfWeek: number; startTime: string | null; endTime: string | null; label: string }) {
     return request<{ id: string }>('POST', '/schedule.php?type=weekly', input as unknown as Record<string, unknown>)
   },
-  addSpecial(input: {
-    dateFrom: string
-    dateTo: string | null
-    startTime: string | null
-    endTime: string | null
-    label: string
-  }) {
+  addSpecial(input: { dateFrom: string; dateTo: string | null; startTime: string | null; endTime: string | null; label: string }) {
     return request<{ id: string }>('POST', '/schedule.php?type=special', input as unknown as Record<string, unknown>)
   },
   remove(id: number, type: 'weekly' | 'special') {
@@ -205,19 +189,8 @@ export interface AiTask {
 }
 
 export interface AiScheduleResult {
-  weekly: {
-    dayOfWeek: number
-    startTime: string | null
-    endTime: string | null
-    label: string
-  }[]
-  special: {
-    dateFrom: string
-    dateTo: string | null
-    startTime: string | null
-    endTime: string | null
-    label: string
-  }[]
+  weekly: { dayOfWeek: number; startTime: string | null; endTime: string | null; label: string }[]
+  special: { dateFrom: string; dateTo: string | null; startTime: string | null; endTime: string | null; label: string }[]
 }
 
 export const aiApi = {
@@ -229,7 +202,7 @@ export const aiApi = {
   },
 }
 
-// --- 计划 API ---
+// --- 计划 API (v2) ---
 
 export interface PlanTaskSlot {
   id: number
@@ -261,6 +234,7 @@ export interface PlanDetail {
 }
 
 export interface PlanGenerateInput {
+  planId?: number
   name?: string
   startDate: string
   endDate: string
@@ -279,7 +253,7 @@ export interface PlanGenerateResult {
   totalAvailableMinutes: number
 }
 
-// --- 计划列表 & 今日任务类型 ---
+// --- 计划列表 v2 ---
 
 export interface PlanListItem {
   id: number
@@ -287,10 +261,14 @@ export interface PlanListItem {
   start_date: string
   end_date: string
   strategy: string
+  homework_count: number
   task_count: number
   completed_count: number
+  status: 'active' | 'pending' | 'completed' | 'expired'
   created_at: string
 }
+
+// --- 今日任务 v2 (多计划) ---
 
 export interface TodayTask {
   id: number
@@ -302,14 +280,20 @@ export interface TodayTask {
   completed: boolean
 }
 
-export interface TodayData {
-  planId: number | null
-  planName: string | null
-  date: string
+export interface PlanTaskGroup {
+  planId: number
+  planName: string
   tasks: TodayTask[]
 }
 
-// --- 日历视图类型 ---
+export interface TodayData {
+  date: string
+  plans: PlanTaskGroup[]
+  totalTasks: number
+  totalMinutes: number
+}
+
+// --- 日历视图 ---
 
 export interface CalendarDay {
   date: string
@@ -328,10 +312,34 @@ export interface CalendarData {
   days: CalendarDay[]
 }
 
+export interface PlanCreateInput {
+  name?: string
+  startDate: string
+  endDate: string
+  dailyStartTime?: string
+  dailyEndTime?: string
+  strategy?: string
+}
+
+export interface PlanCreateResult {
+  id: number
+  name: string
+  startDate: string
+  endDate: string
+}
+
 export const planApi = {
+  /** 创建计划 */
+  create(input: PlanCreateInput) {
+    return request<PlanCreateResult>('POST', '/plans/create.php', input as unknown as Record<string, unknown>)
+  },
+
+  /** 生成每日任务 */
   generate(input: PlanGenerateInput) {
     return request<PlanGenerateResult>('POST', '/plans/generate.php', input as unknown as Record<string, unknown>, 30000)
   },
+
+  /** 计划详情 */
   detail(planId: number) {
     return request<PlanDetail>('GET', `/plans/detail.php?id=${planId}`)
   },
@@ -339,6 +347,21 @@ export const planApi = {
   /** 计划列表 */
   list() {
     return request<{ plans: PlanListItem[] }>('GET', '/plans/list.php')
+  },
+
+  /** 编辑计划 */
+  update(planId: number, input: Partial<PlanCreateInput>) {
+    return request<{ updated: boolean }>('PATCH', `/plans/update.php?id=${planId}`, input as unknown as Record<string, unknown>)
+  },
+
+  /** 删除计划 */
+  remove(planId: number) {
+    return request<{ deleted: boolean }>('DELETE', `/plans/delete.php?id=${planId}`)
+  },
+
+  /** 归档计划 */
+  archive(planId: number) {
+    return request<{ archived: boolean }>('PATCH', `/plans/archive.php?id=${planId}`)
   },
 
   /** 今日任务 */

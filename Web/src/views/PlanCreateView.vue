@@ -1,101 +1,123 @@
 <template>
   <div class="page">
     <header class="page-header">
-      <h2>🎯 生成作业计划</h2>
+      <button class="btn-back" @click="handleBack">← {{ step === 1 ? '返回' : '上一步' }}</button>
+      <h2>{{ stepTitle }}</h2>
     </header>
 
-    <!-- 计划参数 -->
-    <section class="form-card">
-      <div class="form-group">
-        <label>计划名称</label>
-        <input type="text" v-model="planName" maxlength="50" placeholder="暑假作业计划" />
-      </div>
-      <div class="form-row">
-        <div class="form-group flex-1">
-          <label>开始日期</label>
-          <input type="date" v-model="startDate" />
+    <!-- Step 1: 基本信息 -->
+    <template v-if="step === 1">
+      <section class="form-card">
+        <div class="form-group">
+          <label>计划名称</label>
+          <input type="text" v-model="planName" maxlength="50" placeholder="暑假作业计划" />
         </div>
-        <div class="form-group flex-1">
-          <label>结束日期</label>
-          <input type="date" v-model="endDate" />
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>开始日期</label>
+            <input type="date" v-model="startDate" />
+          </div>
+          <div class="form-group flex-1">
+            <label>结束日期</label>
+            <input type="date" v-model="endDate" />
+          </div>
         </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group flex-1">
-          <label>每日开始</label>
-          <input type="time" v-model="dailyStartTime" />
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label>每日开始</label>
+            <input type="time" v-model="dailyStartTime" />
+          </div>
+          <div class="form-group flex-1">
+            <label>每日结束</label>
+            <input type="time" v-model="dailyEndTime" />
+          </div>
         </div>
-        <div class="form-group flex-1">
-          <label>每日结束</label>
-          <input type="time" v-model="dailyEndTime" />
+        <div class="form-actions">
+          <button class="btn-primary btn-press" :disabled="!step1Valid" @click="step1Next">
+            下一步：录入作业 →
+          </button>
         </div>
-      </div>
-    </section>
+      </section>
+    </template>
 
-    <!-- 作业摘要 -->
-    <section class="summary-card">
-      <h3>📋 当前作业</h3>
-      <div v-if="homeworkStore.items.length">
-        <div class="summary-item" v-for="hw in homeworkStore.items" :key="hw.id">
-          <span>{{ hw.subject }} · {{ hw.task_type }}</span>
-          <span class="summary-val">{{ formatAmount(hw.total_amount) }}{{ hw.unit }}{{ hw.time_per_unit ? ` (${hw.total_amount * hw.time_per_unit} 分)` : '' }}</span>
+    <!-- Step 2: 录入作业 -->
+    <template v-if="step === 2">
+      <!-- 手动录入 -->
+      <section class="form-card">
+        <div class="form-row">
+          <div class="form-group half">
+            <label>科目</label>
+            <select v-model="form.subject">
+              <option value="">选择科目</option>
+              <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
+            </select>
+          </div>
+          <div class="form-group half">
+            <label>类型</label>
+            <input type="text" v-model="form.taskType" placeholder="模拟卷" />
+          </div>
         </div>
-        <div class="summary-total">
-          ⚠️ 共 {{ homeworkStore.items.length }} 条，总计约 {{ totalWorkMinutes }} 分钟
+        <div class="form-row">
+          <div class="form-group half">
+            <label>总量</label>
+            <input type="number" v-model.number="form.totalAmount" min="0.01" step="0.01" placeholder="数量" />
+          </div>
+          <div class="form-group half">
+            <label>单位</label>
+            <input type="text" v-model="form.unit" placeholder="张/套/篇" />
+          </div>
         </div>
-      </div>
-      <div class="empty-hint" v-else>
-        还没有作业，请先去「作业」页面录入
-      </div>
-    </section>
+        <div class="form-group">
+          <label>耗时/单位（分钟，选填）</label>
+          <input type="number" v-model.number="form.timePerUnit" min="1" placeholder="默认 60" />
+        </div>
+        <div class="form-group">
+          <label>备注（选填）</label>
+          <input type="text" v-model="form.notes" maxlength="200" placeholder="如：五年高考三年模拟" />
+        </div>
+        <div class="form-actions">
+          <button class="btn-outline btn-press" @click="handleAddAndContinue" :disabled="!formValid">继续添加</button>
+          <button class="btn-primary btn-press" @click="handleAddAndClose" :disabled="!formValid">确定</button>
+        </div>
+      </section>
 
-    <!-- 日程摘要 -->
-    <section class="summary-card">
-      <h3>📅 日程配置</h3>
-      <div v-if="scheduleStore.data.weekly.length || scheduleStore.data.special.length">
-        <div class="summary-item" v-for="w in scheduleStore.data.weekly" :key="'w'+w.id">
-          <span>{{ dayNames[w.day_of_week] }}</span>
-          <span class="summary-val">{{ w.start_time || '全天' }}{{ w.end_time ? ' - ' + w.end_time.slice(0,5) : '' }} {{ w.label }}</span>
+      <!-- 已录入的作业 -->
+      <section class="hw-list" v-if="homeworkItems.length">
+        <h3>已录入 {{ homeworkItems.length }} 条</h3>
+        <div class="hw-item" v-for="hw in homeworkItems" :key="hw.id">
+          <span class="hw-info">{{ hw.subject }} · {{ hw.task_type }} · {{ hw.total_amount }}{{ hw.unit }}</span>
+          <button class="btn-del" @click="removeHomework(hw.id)">✕</button>
         </div>
-        <div class="summary-item" v-for="s in scheduleStore.data.special" :key="'s'+s.id">
-          <span>{{ s.date_from }}{{ s.date_to && s.date_to !== s.date_from ? ' - ' + s.date_to : '' }}</span>
-          <span class="summary-val">{{ s.start_time || '全天' }}{{ s.end_time ? ' - ' + s.end_time.slice(0,5) : '' }} {{ s.label }}</span>
-        </div>
-      </div>
-      <div class="empty-hint" v-else>
-        暂无日程配置（不配置也可以生成计划）
-      </div>
-    </section>
+      </section>
 
-    <!-- 预览 -->
-    <section class="preview-card" v-if="preview">
-      <h3>📊 预览</h3>
-      <div class="preview-grid">
-        <div class="preview-item">
-          <span class="preview-val">{{ preview.availableDays }}</span>
-          <span class="preview-label">可用天数</span>
+      <!-- AI 录入 -->
+      <details class="ai-section">
+        <summary>🤖 AI 智能录入</summary>
+        <textarea v-model="aiText" placeholder="用自然语言描述作业…" rows="3" maxlength="2000"></textarea>
+        <button class="btn-primary btn-ai btn-press" @click="handleAiParse" :disabled="aiParsing">
+          {{ aiParsing ? '解析中...' : '🔮 AI 解析' }}
+        </button>
+        <div class="ai-results" v-if="aiTasks.length">
+          <div class="ai-task" v-for="(task, i) in aiTasks" :key="i">
+            ✅ {{ task.subject }} | {{ task.type }} | {{ task.totalAmount }}{{ task.unit }}
+          </div>
+          <button class="btn-primary btn-press" @click="handleAiConfirm" :disabled="aiConfirming">
+            {{ aiConfirming ? '确认中...' : '全部确认' }}
+          </button>
         </div>
-        <div class="preview-item">
-          <span class="preview-val">{{ totalWorkMinutes }}</span>
-          <span class="preview-label">总工时(分)</span>
-        </div>
-        <div class="preview-item">
-          <span class="preview-val">{{ Math.round(totalWorkMinutes / Math.max(preview.availableDays, 1)) }}</span>
-          <span class="preview-label">日均(分)</span>
-        </div>
-      </div>
-    </section>
+        <div class="error-msg" v-if="aiError">{{ aiError }}</div>
+      </details>
 
-    <!-- 生成按钮 -->
-    <button
-      class="btn-generate btn-press"
-      :class="{ 'btn-generating': generating }"
-      :disabled="!canGenerate || generating"
-      @click="handleGenerate"
-    >
-      <span v-if="generating" class="spinner"></span>
-      {{ generating ? '生成中...' : '🎯 生成计划' }}
-    </button>
+      <!-- 生成按钮 -->
+      <button
+        class="btn-generate btn-press"
+        :class="{ 'btn-generating': generating }"
+        :disabled="homeworkItems.length === 0 || generating"
+        @click="handleGenerate"
+      >
+        {{ generating ? '生成中...' : '🎯 生成每日计划' }}
+      </button>
+    </template>
 
     <!-- 错误 -->
     <div class="error-msg" v-if="errorMsg">{{ errorMsg }}</div>
@@ -103,12 +125,10 @@
     <!-- 结果 -->
     <div class="result-card" v-if="result">
       <h3>✅ 计划已生成！</h3>
-      <p>计划名称：{{ result.name }}</p>
-      <p>日期范围：{{ result.startDate }} ~ {{ result.endDate }}</p>
-      <p>可用天数：{{ result.availableDays }} 天</p>
-      <p>总工时：{{ result.totalWorkMinutes }} 分钟</p>
-      <button class="btn-primary btn-press" @click="viewPlan">返回计划列表 →</button>
-      <button class="btn-outline btn-press" @click="viewDetail">查看计划详情</button>
+      <p>计划：{{ result.name }}</p>
+      <p>可用 {{ result.availableDays }} 天，共 {{ result.totalWorkMinutes }} 分钟</p>
+      <button class="btn-primary btn-press" @click="router.push('/plan/' + result.planId)">查看计划详情 →</button>
+      <button class="btn-outline btn-press" @click="router.push('/plans')">返回计划列表</button>
     </div>
   </div>
 </template>
@@ -116,43 +136,125 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useHomeworkStore } from '../stores/homework'
-import { useScheduleStore } from '../stores/schedule'
-import { planApi, type PlanGenerateResult } from '../api'
+import { planApi, aiApi, homeworkApi, type AiTask, type HomeworkItem, type PlanGenerateResult } from '../api'
 
 const router = useRouter()
-const homeworkStore = useHomeworkStore()
-const scheduleStore = useScheduleStore()
+const subjects = ['数学', '英语', '语文', '物理', '化学', '生物', '历史', '地理', '政治']
 
-const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+// Step
+const step = ref(1)
+const stepTitle = computed(() => ['', '创建新计划', '录入作业'][step.value])
 
+// Step 1
 const planName = ref('暑假作业计划')
-const startDate = ref('2026-07-01')
-const endDate = ref('2026-08-30')
+const startDate = ref('')
+const endDate = ref('')
 const dailyStartTime = ref('08:00')
 const dailyEndTime = ref('22:00')
+const createdPlanId = ref(0)
 
+const step1Valid = computed(() => startDate.value && endDate.value)
+
+// Step 2
+const form = ref({ subject: '', taskType: '有效作业', totalAmount: 1 as number | null, unit: '张', timePerUnit: null as number | null, notes: '' })
+const formValid = computed(() => form.value.subject && form.value.taskType.trim() && form.value.totalAmount && form.value.totalAmount > 0 && form.value.unit.trim())
+const homeworkItems = ref<HomeworkItem[]>([])
 const generating = ref(false)
 const errorMsg = ref('')
 const result = ref<PlanGenerateResult | null>(null)
-const preview = ref<{ availableDays: number } | null>(null)
 
-const totalWorkMinutes = computed(() => {
-  return homeworkStore.items.reduce((sum, hw) => {
-    return sum + (hw.time_per_unit ? hw.total_amount * hw.time_per_unit : 0)
-  }, 0)
+// AI
+const aiText = ref('')
+const aiTasks = ref<AiTask[]>([])
+const aiParsing = ref(false)
+const aiConfirming = ref(false)
+const aiError = ref('')
+
+onMounted(() => {
+  const today = new Date()
+  const end = new Date()
+  end.setMonth(end.getMonth() + 2)
+  startDate.value = today.toISOString().slice(0, 10)
+  endDate.value = end.toISOString().slice(0, 10)
 })
 
-const canGenerate = computed(() => {
-  return homeworkStore.items.length > 0 && startDate.value && endDate.value
-})
+function handleBack() {
+  if (step.value === 2) {
+    step.value = 1
+  } else {
+    router.push('/plans')
+  }
+}
 
-onMounted(async () => {
-  await Promise.all([homeworkStore.fetchAll(), scheduleStore.fetchAll()])
-})
+async function step1Next() {
+  // 先创建计划
+  const res = await planApi.create({
+    name: planName.value,
+    startDate: startDate.value,
+    endDate: endDate.value,
+    dailyStartTime: dailyStartTime.value + ':00',
+    dailyEndTime: dailyEndTime.value + ':00',
+  })
+  if (res.ok) {
+    createdPlanId.value = res.data.id
+    planName.value = res.data.name
+    step.value = 2
+  } else {
+    errorMsg.value = res.error || '创建计划失败'
+  }
+}
 
-function formatAmount(n: number): string {
-  return Number.isInteger(n) ? n.toString() : n.toFixed(2).replace(/\.?0+$/, '')
+async function loadHomework() {
+  if (createdPlanId.value) {
+    const res = await homeworkApi.list(createdPlanId.value)
+    if (res.ok) homeworkItems.value = res.data.homework
+  }
+}
+
+async function addHomework(input: { subject: string; type: string; totalAmount: number; unit: string; timePerUnit?: number | null; notes?: string }) {
+  if (!createdPlanId.value) return false
+  const res = await homeworkApi.create({
+    planId: createdPlanId.value,
+    ...input,
+  })
+  if (res.ok) {
+    await loadHomework()
+    return true
+  }
+  errorMsg.value = res.error || '添加失败'
+  return false
+}
+
+async function handleAddAndContinue() {
+  if (!form.value.totalAmount) return
+  const ok = await addHomework({
+    subject: form.value.subject,
+    type: form.value.taskType,
+    totalAmount: form.value.totalAmount,
+    unit: form.value.unit,
+    timePerUnit: form.value.timePerUnit || 60,
+    notes: form.value.notes,
+  })
+  if (ok) {
+    form.value = { subject: '', taskType: '有效作业', totalAmount: 1, unit: '张', timePerUnit: null, notes: '' }
+  }
+}
+
+async function handleAddAndClose() {
+  if (!form.value.totalAmount) return
+  await addHomework({
+    subject: form.value.subject,
+    type: form.value.taskType,
+    totalAmount: form.value.totalAmount,
+    unit: form.value.unit,
+    timePerUnit: form.value.timePerUnit || 60,
+    notes: form.value.notes,
+  })
+}
+
+async function removeHomework(id: number) {
+  await homeworkApi.remove(id)
+  await loadHomework()
 }
 
 async function handleGenerate() {
@@ -161,16 +263,14 @@ async function handleGenerate() {
   result.value = null
 
   const res = await planApi.generate({
-    name: planName.value,
+    planId: createdPlanId.value,
     startDate: startDate.value,
     endDate: endDate.value,
     dailyStartTime: dailyStartTime.value + ':00',
     dailyEndTime: dailyEndTime.value + ':00',
-    strategy: 'average',
   })
 
   generating.value = false
-
   if (res.ok) {
     result.value = res.data
   } else {
@@ -178,250 +278,104 @@ async function handleGenerate() {
   }
 }
 
-function viewPlan() {
-  router.push('/plans')
+async function handleAiParse() {
+  if (!aiText.value.trim()) return
+  aiParsing.value = true; aiError.value = ''; aiTasks.value = []
+  const res = await aiApi.parseHomework(aiText.value.trim())
+  aiParsing.value = false
+  if (res.ok) aiTasks.value = res.data.tasks
+  else aiError.value = res.error || 'AI 解析失败'
 }
 
-function viewDetail() {
-  if (result.value) {
-    router.push(`/plan/${result.value.planId}`)
+async function handleAiConfirm() {
+  aiConfirming.value = true; let allOk = true
+  for (const task of aiTasks.value) {
+    const ok = await addHomework({
+      subject: task.subject, type: task.type, totalAmount: task.totalAmount,
+      unit: task.unit, timePerUnit: task.timePerUnit || undefined, notes: task.notes,
+    })
+    if (!ok) allOk = false
   }
+  aiConfirming.value = false
+  if (allOk) { aiTasks.value = []; aiText.value = ''; aiError.value = '' }
 }
 </script>
 
 <style scoped>
-.page {
-  padding: 16px;
-  padding-bottom: 100px;
-  max-width: 600px;
-  margin: 0 auto;
+.page { padding: 16px; padding-bottom: 100px; max-width: 600px; margin: 0 auto; }
+
+.page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.page-header h2 { font-size: 1.125rem; font-weight: 700; color: var(--color-text); }
+
+.btn-back {
+  padding: 6px 12px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-card); color: var(--color-text-secondary); font-size: 0.875rem;
+  cursor: pointer; font-family: var(--font-family); white-space: nowrap;
 }
 
-.page-header {
-  margin-bottom: 16px;
+.form-card { background: var(--color-card); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.form-group { display: flex; flex-direction: column; margin-bottom: 10px; }
+.form-group label { font-size: 0.8125rem; color: var(--color-text-secondary); margin-bottom: 4px; }
+.form-group input, .form-group select {
+  padding: 10px 12px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm);
+  font-size: 0.9375rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text);
 }
-
-.page-header h2 {
-  font-size: 1.25rem;
-  font-weight: 700;
-}
-
-.form-card, .summary-card, .preview-card, .result-card {
-  background: var(--color-card);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-  margin-bottom: 16px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-}
-
-h3 {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  margin-bottom: 10px;
-  color: var(--color-text);
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 10px;
-}
-
-.form-group label {
-  font-size: 0.8125rem;
-  color: var(--color-text-secondary);
-  margin-bottom: 4px;
-}
-
-.form-group input {
-  padding: 10px 12px;
-  border: 1.5px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: 0.9375rem;
-  font-family: var(--font-family);
-  background: var(--color-input-bg);
-  color: var(--color-text);
-}
-
-.form-group input:focus {
-  outline: none;
-  border-color: var(--color-border-focus);
-}
-
-.form-row {
-  display: flex;
-  gap: 10px;
-}
-
+.form-group input:focus, .form-group select:focus { outline: none; border-color: var(--color-border-focus); }
+.form-row { display: flex; gap: 10px; }
+.half { flex: 1; }
 .flex-1 { flex: 1; }
-
-.summary-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 6px 0;
-  font-size: 0.875rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.summary-item:last-child {
-  border-bottom: none;
-}
-
-.summary-val {
-  color: var(--color-text-secondary);
-}
-
-.summary-total {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.8125rem;
-  color: var(--color-primary);
-  font-weight: 600;
-}
-
-.empty-hint {
-  font-size: 0.8125rem;
-  color: var(--color-text-placeholder);
-  padding: 8px 0;
-}
-
-.preview-grid {
-  display: flex;
-  gap: 12px;
-}
-
-.preview-item {
-  flex: 1;
-  text-align: center;
-  padding: 12px 8px;
-  background: var(--color-input-bg);
-  border-radius: var(--radius-sm);
-}
-
-.preview-val {
-  display: block;
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--color-primary);
-}
-
-.preview-label {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  margin-top: 2px;
-}
-
-.btn-generate {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 16px;
-  border: none;
-  border-radius: var(--radius);
-  background: var(--color-primary);
-  color: #fff;
-  font-size: 1.125rem;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: var(--font-family);
-  margin-bottom: 16px;
-  position: relative;
-}
-
-.btn-generate:disabled {
-  background: var(--color-primary-disabled);
-  cursor: not-allowed;
-}
-
-/* 生成中脉冲光晕 */
-.btn-generating {
-  animation: pulseGlow 1.5s ease-in-out infinite;
-}
-
-.error-msg {
-  color: var(--color-error);
-  font-size: 0.875rem;
-  text-align: center;
-  margin-bottom: 16px;
-  padding: 12px;
-  background: var(--color-error-bg);
-  border-radius: var(--radius-sm);
-}
-
-.result-card p {
-  font-size: 0.875rem;
-  color: var(--color-text-secondary);
-  margin-bottom: 6px;
-}
-
-/* 🎬 预览卡片淡入 */
-.preview-card {
-  animation: fadeInUp var(--duration-slow) ease both;
-}
-
-/* 🎬 结果卡片从下方滑入 */
-.result-card {
-  animation: resultSlideUp 0.4s var(--ease-smooth) both;
-}
-
-@keyframes resultSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(24px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+.form-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 .btn-primary {
-  display: block;
-  width: 100%;
-  margin-top: 12px;
-  padding: 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: #fff;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: var(--font-family);
-  text-align: center;
+  padding: 10px 16px; border: none; border-radius: var(--radius-sm); background: var(--color-primary);
+  color: #fff; font-size: 0.875rem; font-weight: 600; cursor: pointer; font-family: var(--font-family); flex: 1;
 }
-
+.btn-primary:disabled { background: var(--color-primary-disabled); cursor: not-allowed; }
 .btn-outline {
-  display: block;
-  width: 100%;
-  margin-top: 8px;
-  padding: 12px;
-  border: 1.5px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 0.9375rem;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: var(--font-family);
-  text-align: center;
+  padding: 10px 16px; border: 1.5px solid var(--color-primary); border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-primary); font-size: 0.875rem; font-weight: 600;
+  cursor: pointer; font-family: var(--font-family); flex: 1;
 }
 
-.spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+/* 已录入作业 */
+.hw-list { margin-bottom: 16px; }
+.hw-list h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; color: var(--color-text); }
+.hw-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; background: var(--color-card); border-radius: var(--radius-sm);
+  margin-bottom: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
+.hw-info { font-size: 0.875rem; color: var(--color-text); }
+.btn-del {
+  background: none; border: none; color: var(--color-text-placeholder);
+  font-size: 1rem; cursor: pointer; padding: 4px;
+}
+.btn-del:hover { color: var(--color-error); }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+/* AI */
+.ai-section { background: var(--color-card); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 16px; }
+.ai-section summary { font-size: 1rem; font-weight: 600; cursor: pointer; color: var(--color-text); padding: 4px 0; }
+.ai-section textarea {
+  width: 100%; padding: 12px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm);
+  font-size: 0.9375rem; font-family: var(--font-family); resize: vertical;
+  background: var(--color-input-bg); color: var(--color-text); box-sizing: border-box; margin-top: 12px;
 }
+.ai-section textarea:focus { outline: none; border-color: var(--color-border-focus); }
+.btn-ai { width: 100%; margin-top: 10px; }
+.ai-results { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.ai-task { padding: 10px 12px; background: #F0FDF4; border-radius: var(--radius-sm); font-size: 0.875rem; color: #166534; }
+
+.btn-generate {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 16px;
+  border: none; border-radius: var(--radius); background: var(--color-primary); color: #fff;
+  font-size: 1.125rem; font-weight: 700; cursor: pointer; font-family: var(--font-family); margin-bottom: 16px;
+}
+.btn-generate:disabled { background: var(--color-primary-disabled); cursor: not-allowed; }
+.btn-generating { animation: pulseGlow 1.5s ease-in-out infinite; }
+
+.error-msg { color: var(--color-error); font-size: 0.875rem; text-align: center; margin-bottom: 16px; padding: 12px; background: var(--color-error-bg); border-radius: var(--radius-sm); }
+
+.result-card { background: var(--color-card); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.result-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: var(--color-text); }
+.result-card p { font-size: 0.875rem; color: var(--color-text-secondary); margin-bottom: 6px; }
 </style>
