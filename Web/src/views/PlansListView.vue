@@ -40,13 +40,13 @@
       <div class="empty-icon">🎯</div>
       <div class="empty-title">还没有计划</div>
       <div class="empty-hint">点击下方按钮生成第一个计划</div>
-      <button class="btn-generate" @click="handleCreatePlan">
+      <button class="btn-generate btn-press" @click="handleCreatePlan">
         ✨ 生成我的计划
       </button>
     </div>
 
     <!-- 新建计划按钮（有列表时显示为加号卡片） -->
-    <div class="new-plan-card" v-if="!loading && plans.length > 0" @click="handleCreatePlan">
+    <div class="new-plan-card card-press" v-if="!loading && plans.length > 0" @click="handleCreatePlan">
       <span class="new-plan-icon">＋</span>
       <span class="new-plan-text">新建计划</span>
     </div>
@@ -128,12 +128,19 @@ onMounted(async () => {
   padding: 16px 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   cursor: pointer;
-  transition: transform 0.15s;
+  transition: transform var(--duration-fast) var(--ease-smooth), box-shadow var(--duration-normal) ease;
+  animation: fadeInUp var(--duration-slow) ease both;
 }
 
 .plan-card:active {
   transform: scale(0.98);
 }
+
+.plan-card:nth-child(1) { animation-delay: 0s; }
+.plan-card:nth-child(2) { animation-delay: 0.08s; }
+.plan-card:nth-child(3) { animation-delay: 0.16s; }
+.plan-card:nth-child(4) { animation-delay: 0.24s; }
+.plan-card:nth-child(5) { animation-delay: 0.32s; }
 
 .plan-card-header {
   display: flex;

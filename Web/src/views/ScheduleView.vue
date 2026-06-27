@@ -15,7 +15,7 @@
             <span v-else class="all-day">全天</span>
             <span class="item-label" v-if="w.label">{{ w.label }}</span>
           </div>
-          <button class="btn-del" @click="handleDelete(w.id, 'weekly')">✕</button>
+          <button class="btn-del btn-press" @click="handleDelete(w.id, 'weekly')">✕</button>
         </div>
       </div>
       <div class="empty-hint" v-else>暂无每周固定时段</div>
@@ -44,7 +44,7 @@
             <label>标签</label>
             <input type="text" v-model="weeklyForm.label" placeholder="如：补习班" maxlength="20" />
           </div>
-          <button class="btn-primary btn-sm" @click="handleAddWeekly">添加</button>
+          <button class="btn-primary btn-sm btn-press" @click="handleAddWeekly">添加</button>
         </div>
       </details>
     </section>
@@ -60,7 +60,7 @@
             <span v-else class="all-day">全天</span>
             <span class="item-label" v-if="s.label">{{ s.label }}</span>
           </div>
-          <button class="btn-del" @click="handleDelete(s.id, 'special')">✕</button>
+          <button class="btn-del btn-press" @click="handleDelete(s.id, 'special')">✕</button>
         </div>
       </div>
       <div class="empty-hint" v-else>暂无特殊日期</div>
@@ -91,7 +91,7 @@
             <label>标签</label>
             <input type="text" v-model="specialForm.label" placeholder="如：旅行" maxlength="20" />
           </div>
-          <button class="btn-primary btn-sm" @click="handleAddSpecial">添加</button>
+          <button class="btn-primary btn-sm btn-press" @click="handleAddSpecial">添加</button>
         </div>
       </details>
     </section>
@@ -106,7 +106,7 @@
           rows="3"
           maxlength="2000"
         ></textarea>
-        <button class="btn-primary btn-ai" @click="handleAiParse" :disabled="aiParsing">
+        <button class="btn-primary btn-ai btn-press" @click="handleAiParse" :disabled="aiParsing">
           {{ aiParsing ? '解析中...' : '🔮 AI 解析' }}
         </button>
       </div>
@@ -123,7 +123,7 @@
             {{ s.dateFrom }}{{ s.dateTo ? ' - ' + s.dateTo : '' }} {{ s.startTime || '全天' }}{{ s.endTime ? ' - ' + s.endTime : '' }} {{ s.label }}
           </div>
         </div>
-        <button class="btn-primary btn-sm" @click="handleAiConfirm" :disabled="aiConfirming">
+        <button class="btn-primary btn-sm btn-press" @click="handleAiConfirm" :disabled="aiConfirming">
           {{ aiConfirming ? '确认中...' : '全部确认' }}
         </button>
       </div>
@@ -478,4 +478,24 @@ async function handleAiConfirm() {
   margin-top: 8px;
   text-align: center;
 }
+
+/* 🎬 日程项入场 */
+.schedule-item {
+  animation: fadeInUp var(--duration-slow) ease both;
+}
+
+.schedule-item:nth-child(1) { animation-delay: 0s; }
+.schedule-item:nth-child(2) { animation-delay: 0.06s; }
+.schedule-item:nth-child(3) { animation-delay: 0.12s; }
+.schedule-item:nth-child(4) { animation-delay: 0.18s; }
+.schedule-item:nth-child(5) { animation-delay: 0.24s; }
+
+/* 🎬 AI 结果项 */
+.ai-item {
+  animation: fadeInUp 0.3s ease both;
+}
+
+.ai-item:nth-child(1) { animation-delay: 0s; }
+.ai-item:nth-child(2) { animation-delay: 0.05s; }
+.ai-item:nth-child(3) { animation-delay: 0.1s; }
 </style>

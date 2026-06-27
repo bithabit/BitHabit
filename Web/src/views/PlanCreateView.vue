@@ -88,7 +88,8 @@
 
     <!-- 生成按钮 -->
     <button
-      class="btn-generate"
+      class="btn-generate btn-press"
+      :class="{ 'btn-generating': generating }"
       :disabled="!canGenerate || generating"
       @click="handleGenerate"
     >
@@ -106,8 +107,8 @@
       <p>日期范围：{{ result.startDate }} ~ {{ result.endDate }}</p>
       <p>可用天数：{{ result.availableDays }} 天</p>
       <p>总工时：{{ result.totalWorkMinutes }} 分钟</p>
-      <button class="btn-primary" @click="viewPlan">返回计划列表 →</button>
-      <button class="btn-outline" @click="viewDetail">查看计划详情</button>
+      <button class="btn-primary btn-press" @click="viewPlan">返回计划列表 →</button>
+      <button class="btn-outline btn-press" @click="viewDetail">查看计划详情</button>
     </div>
   </div>
 </template>
@@ -328,11 +329,17 @@ h3 {
   cursor: pointer;
   font-family: var(--font-family);
   margin-bottom: 16px;
+  position: relative;
 }
 
 .btn-generate:disabled {
   background: var(--color-primary-disabled);
   cursor: not-allowed;
+}
+
+/* 生成中脉冲光晕 */
+.btn-generating {
+  animation: pulseGlow 1.5s ease-in-out infinite;
 }
 
 .error-msg {
@@ -349,6 +356,27 @@ h3 {
   font-size: 0.875rem;
   color: var(--color-text-secondary);
   margin-bottom: 6px;
+}
+
+/* 🎬 预览卡片淡入 */
+.preview-card {
+  animation: fadeInUp var(--duration-slow) ease both;
+}
+
+/* 🎬 结果卡片从下方滑入 */
+.result-card {
+  animation: resultSlideUp 0.4s var(--ease-smooth) both;
+}
+
+@keyframes resultSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .btn-primary {

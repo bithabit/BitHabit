@@ -17,15 +17,15 @@
     <!-- 有任务时 -->
     <div class="task-list" v-if="todayData && todayData.tasks.length > 0">
       <div
-        class="task-card"
+        class="task-card card-press"
         :class="{ completed: task.completed }"
         v-for="task in todayData.tasks"
         :key="task.id"
         @click="toggleTask(task)"
       >
         <div class="task-check">
-          <span v-if="task.completed">✅</span>
-          <span v-else class="uncheck">▢</span>
+          <span v-if="task.completed" :class="{ 'task-check-bounce': bouncingId === task.id }">✅</span>
+          <span v-else class="uncheck" :class="{ 'task-check-bounce': bouncingId === task.id }">▢</span>
         </div>
         <div class="task-info">
           <div class="task-title">
@@ -49,14 +49,14 @@
 
     <!-- 无计划 -->
     <div class="empty-state" v-else-if="todayData && todayData.planId === null">
-      <div class="empty-icon">📋</div>
+      <div class="empty-icon empty-icon-float">📋</div>
       <div class="empty-title">还没有学习计划</div>
       <div class="empty-hint">去「计划」页面生成一个吧 →</div>
     </div>
 
     <!-- 今日无任务（休息日） -->
     <div class="empty-state" v-else-if="todayData && todayData.tasks.length === 0">
-      <div class="empty-icon">🎉</div>
+      <div class="empty-icon empty-icon-float">🎉</div>
       <div class="empty-title">今天没有任务</div>
       <div class="empty-hint">好好休息一下吧～</div>
     </div>
@@ -78,6 +78,7 @@ const auth = useAuthStore()
 const router = useRouter()
 
 const todayData = ref<TodayData | null>(null)
+const bouncingId = ref<number | null>(null)
 
 const totalMinutes = computed(() => {
   if (!todayData.value) return 0
@@ -117,6 +118,8 @@ async function toggleTask(task: { id: number; completed: boolean }) {
   const res = await planApi.toggleTask(task.id)
   if (res.ok) {
     task.completed = res.data.completed
+    bouncingId.value = task.id
+    setTimeout(() => { if (bouncingId.value === task.id) bouncingId.value = null }, 400)
   }
 }
 
@@ -213,11 +216,7 @@ onMounted(async () => {
   border-radius: var(--radius);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-
-.task-card:active {
-  transform: scale(0.98);
+  transition: transform var(--duration-fast) var(--ease-smooth), box-shadow var(--duration-normal) ease;
 }
 
 .task-card.completed {
@@ -226,6 +225,7 @@ onMounted(async () => {
 
 .task-card.completed .task-title {
   text-decoration: line-through;
+  transition: text-decoration 0.3s ease;
 }
 
 .task-check {
@@ -237,6 +237,11 @@ onMounted(async () => {
 
 .uncheck {
   color: var(--color-text-placeholder);
+}
+
+/* ✅ 打卡弹簧 */
+.task-check-bounce {
+  animation: checkBounce 0.4s var(--ease-spring);
 }
 
 .task-info {
@@ -303,6 +308,10 @@ onMounted(async () => {
 .empty-icon {
   font-size: 3rem;
   margin-bottom: 16px;
+}
+
+.empty-icon-float {
+  animation: float 3s ease-in-out infinite;
 }
 
 .empty-title {

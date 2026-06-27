@@ -30,6 +30,7 @@
     </div>
 
     <!-- 手动录入表单 -->
+    <Transition name="form-slide">
     <div class="form-section" v-if="showForm">
       <h3>录入新作业</h3>
       <div class="form-row">
@@ -64,15 +65,16 @@
         <input type="text" v-model="form.notes" maxlength="200" placeholder="如：五年高考三年模拟" />
       </div>
       <div class="form-actions">
-        <button class="btn-secondary" @click="showForm = false">取消</button>
-        <button class="btn-primary" @click="handleAddAndContinue" :disabled="!canAdd">继续添加</button>
-        <button class="btn-primary" @click="handleAddAndClose" :disabled="!canAdd">保存</button>
+        <button class="btn-secondary btn-press" @click="showForm = false">取消</button>
+        <button class="btn-primary btn-press" @click="handleAddAndContinue" :disabled="!canAdd">继续添加</button>
+        <button class="btn-primary btn-press" @click="handleAddAndClose" :disabled="!canAdd">保存</button>
       </div>
       <div class="error-msg" v-if="store.error">{{ store.error }}</div>
     </div>
+    </Transition>
 
     <!-- 添加按钮 -->
-    <button class="btn-fab" v-if="!showForm" @click="showForm = true">+ 添加作业</button>
+    <button class="btn-fab btn-press" v-if="!showForm" @click="showForm = true">+ 添加作业</button>
 
     <!-- AI 解析区 -->
     <details class="ai-section">
@@ -84,7 +86,7 @@
           rows="3"
           maxlength="2000"
         ></textarea>
-        <button class="btn-primary btn-ai" @click="handleAiParse" :disabled="aiParsing">
+        <button class="btn-primary btn-ai btn-press" @click="handleAiParse" :disabled="aiParsing">
           {{ aiParsing ? '解析中...' : '🔮 AI 解析' }}
         </button>
       </div>
@@ -93,7 +95,7 @@
           <span>✅ {{ task.subject }} | {{ task.type }} | {{ task.totalAmount }}{{ task.unit }}</span>
           <span class="ai-task-time" v-if="task.timePerUnit">（{{ task.totalAmount * task.timePerUnit }} 分）</span>
         </div>
-        <button class="btn-primary" @click="handleAiConfirm" :disabled="aiConfirming">
+        <button class="btn-primary btn-press" @click="handleAiConfirm" :disabled="aiConfirming">
           {{ aiConfirming ? '确认中...' : '全部确认' }}
         </button>
       </div>
@@ -531,5 +533,32 @@ async function handleAiConfirm() {
 .ai-task-time {
   color: var(--color-text-placeholder);
   font-size: 0.8125rem;
+}
+
+/* 🎬 卡片入场动画 */
+.homework-card {
+  animation: fadeInUp var(--duration-slow) ease both;
+}
+
+.homework-card:nth-child(1) { animation-delay: 0s; }
+.homework-card:nth-child(2) { animation-delay: 0.06s; }
+.homework-card:nth-child(3) { animation-delay: 0.12s; }
+.homework-card:nth-child(4) { animation-delay: 0.18s; }
+.homework-card:nth-child(5) { animation-delay: 0.24s; }
+
+/* 🎬 表单展开/折叠 */
+.form-slide-enter-active {
+  transition: all 0.3s ease;
+}
+.form-slide-leave-active {
+  transition: all 0.2s ease;
+}
+.form-slide-enter-from {
+  opacity: 0;
+  transform: translateY(-12px);
+}
+.form-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 </style>
