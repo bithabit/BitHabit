@@ -328,6 +328,42 @@ export interface PlanCreateResult {
   endDate: string
 }
 
+// --- 预览分配类型 ---
+
+export interface PreviewTask {
+  homeworkId: number
+  subject: string
+  taskType: string
+  amount: number
+  unit: string
+  estimatedMinutes: number
+}
+
+export interface PreviewDay {
+  date: string
+  totalMinutes: number
+  overLimit: boolean
+  tasks: PreviewTask[]
+}
+
+export interface PreviewResult {
+  daily: PreviewDay[]
+  warnings: string[]
+  stats: { availableDays: number; maxDailyMinutes: number; rhythm: number }
+}
+
+export interface HomeworkAdjustItem {
+  id: number
+  subject: string
+  taskType: string
+  totalAmount: number
+  unit: string
+  timePerUnit: number | null
+  windowStart: string | null
+  windowEnd: string | null
+  locked: boolean
+}
+
 export const planApi = {
   /** 创建计划 */
   create(input: PlanCreateInput) {
@@ -379,6 +415,21 @@ export const planApi = {
   /** 月度日历汇总 */
   calendar(planId: number, year: number, month: number) {
     return request<CalendarData>('GET', `/plans/calendar.php?planId=${planId}&year=${year}&month=${month}`)
+  },
+
+  /** 预览分配 */
+  preview(input: { planId: number; rhythm: number; maxDailyMinutes: number; homeworkOverrides?: Record<string, unknown>[] }) {
+    return request<PreviewResult>('POST', '/plans/preview.php', input as unknown as Record<string, unknown>)
+  },
+
+  /** 获取逐项调整列表 */
+  getHomeworkAdjust(planId: number) {
+    return request<{ homework: HomeworkAdjustItem[] }>('GET', `/plans/homework-adjust.php?planId=${planId}`)
+  },
+
+  /** 保存逐项调整 */
+  saveHomeworkAdjust(planId: number, adjustments: { homeworkId: number; windowStart?: string | null; windowEnd?: string | null; locked?: boolean }[]) {
+    return request<{ updated: number }>('PUT', `/plans/homework-adjust.php?planId=${planId}`, { adjustments } as unknown as Record<string, unknown>)
   },
 
   /** 单日任务列表 */

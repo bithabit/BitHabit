@@ -33,9 +33,7 @@
       <!-- 操作按钮 -->
       <div class="action-row">
         <router-link :to="`/plan/${planId}/calendar`" class="btn-action">📅 日历</router-link>
-        <button class="btn-action" @click="handleRegenerate" :disabled="regenerating">
-          {{ regenerating ? '重新生成中...' : '🔄 重新生成' }}
-        </button>
+        <router-link :to="`/plan/${planId}/allocate`" class="btn-action">📐 分配策略</router-link>
       </div>
 
       <!-- 作业列表 -->
@@ -164,7 +162,6 @@ const overallPct = computed(() => totalTasks.value > 0 ? Math.round((totalComple
 const showMenu = ref<number | null>(null)
 const editingId = ref<number | null>(null)
 const submittingHw = ref(false)
-const regenerating = ref(false)
 
 // Add form
 const showAddForm = ref(false)
@@ -234,16 +231,6 @@ async function handleAddHw() {
   loadAll()
 }
 
-async function handleRegenerate() {
-  regenerating.value = true
-  const res = await planApi.generate({ planId: planId.value, startDate: '', endDate: '' })
-  regenerating.value = false
-  if (res.ok) {
-    loadAll()
-  } else {
-    error.value = res.error || '重新生成失败'
-  }
-}
 </script>
 
 <style scoped>

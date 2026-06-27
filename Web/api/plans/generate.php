@@ -1,17 +1,13 @@
 <?php
 /**
- * BitHabit - 生成暑假作业计划
+ * BitHabit - 生成暑假作业计划 (v2)
  *
  * POST /api/plans/generate.php
  *
- * 整数单位分配算法：
- * 1. 汇总总工时
- * 2. 生成日期列表 between(start, end)
- * 3. 过滤全天休息/占用日
- * 4. 计算每日可用分钟（减去部分时段占用）
- * 5. 检查总工时 ≤ 总可用分钟
- * 6. 对每科作业：base = floor(units / days)，余数前 days 各多 1 单位
- * 7. 校验每日工时 ≤ 可用分钟，超限自动延后
+ * 节奏权重曲线分配：
+ * 1. 节奏(rhythm) → 权重曲线 → 整数分配
+ * 2. 时间窗口约束 + 每日上限
+ * 3. 写入 plan_tasks（保留锁定任务）
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -31,382 +27,234 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 $input = json_decode(file_get_contents('php://input'), true);
 $conn = getDbConnection();
 
-// --- 参数解析 & 校验 ---
-$planId = (int)($input['planId'] ?? $input['plan_id'] ?? 0);
-$planName = trim($input['name'] ?? '暑假作业计划');
+$planId = (int)($input['planId'] ?? 0);
+$rhythm = max(-2, min(2, (int)($input['rhythm'] ?? 0)));
+$maxDailyMinutes = (int)($input['maxDailyMinutes'] ?? 300);
+$homeworkOverrides = $input['homeworkOverrides'] ?? [];
 $startDate = $input['startDate'] ?? $input['start_date'] ?? '';
 $endDate = $input['endDate'] ?? $input['end_date'] ?? '';
-$dailyStartTime = $input['dailyStartTime'] ?? $input['daily_start_time'] ?? '08:00:00';
-$dailyEndTime = $input['dailyEndTime'] ?? $input['daily_end_time'] ?? '22:00:00';
-$strategy = $input['strategy'] ?? 'average';
 
-// 如果传了 plan_id，验证归属并从计划获取日期
-if ($planId > 0) {
-    $planStmt = $conn->prepare('SELECT id, name, start_date, end_date, daily_start_time, daily_end_time FROM plans WHERE id = ? AND user_id = ?');
-    $planStmt->bind_param('ii', $planId, $userId);
-    $planStmt->execute();
-    $planRow = $planStmt->get_result()->fetch_assoc();
-    if (!$planRow) {
-        http_response_code(404);
-        echo json_encode(['error' => '计划不存在', 'code' => 'NOT_FOUND']);
-        exit;
-    }
-    $planName = $planRow['name'];
-    // 如果用户没传日期，用计划定义的日期
-    if (empty($startDate)) $startDate = $planRow['start_date'];
-    if (empty($endDate)) $endDate = $planRow['end_date'];
-    if ($dailyStartTime === '08:00:00' && $planRow['daily_start_time'] !== '08:00:00') $dailyStartTime = $planRow['daily_start_time'];
-    if ($dailyEndTime === '22:00:00' && $planRow['daily_end_time'] !== '22:00:00') $dailyEndTime = $planRow['daily_end_time'];
-}
-
-if (empty($startDate) || empty($endDate)) {
+if ($planId <= 0) {
     http_response_code(400);
-    echo json_encode(['error' => '开始和结束日期为必填', 'code' => 'INVALID_INPUT']);
+    echo json_encode(['error' => '缺少 planId', 'code' => 'INVALID_INPUT']);
     exit;
 }
 
+$planStmt = $conn->prepare('SELECT id, name, start_date, end_date FROM plans WHERE id = ? AND user_id = ?');
+$planStmt->bind_param('ii', $planId, $userId);
+$planStmt->execute();
+$plan = $planStmt->get_result()->fetch_assoc();
+if (!$plan) {
+    http_response_code(404);
+    echo json_encode(['error' => '计划不存在', 'code' => 'NOT_FOUND']);
+    exit;
+}
+
+if (empty($startDate)) $startDate = $plan['start_date'];
+if (empty($endDate)) $endDate = $plan['end_date'];
+$planName = $plan['name'];
 $startTs = strtotime($startDate);
 $endTs = strtotime($endDate);
 
-if (!$startTs || !$endTs || $startTs > $endTs) {
-    http_response_code(400);
-    echo json_encode(['error' => '日期格式错误或开始日期晚于结束日期', 'code' => 'INVALID_DATE']);
-    exit;
-}
-
-// --- 1. 获取作业列表 ---
-$homeworkQuery = $planId > 0
-    ? 'SELECT id, subject, task_type, total_amount, unit, time_per_unit FROM homework WHERE user_id = ? AND plan_id = ? ORDER BY subject'
-    : 'SELECT id, subject, task_type, total_amount, unit, time_per_unit FROM homework WHERE user_id = ? ORDER BY subject';
-$stmt = $conn->prepare($homeworkQuery);
-if ($planId > 0) {
-    $stmt->bind_param('ii', $userId, $planId);
-} else {
-    $stmt->bind_param('i', $userId);
-}
-$stmt->execute();
-$homeworkResult = $stmt->get_result();
-
-$homework = [];
-$totalWorkMinutes = 0;
-
-while ($row = $homeworkResult->fetch_assoc()) {
-    $row['id'] = (int)$row['id'];
-    $row['total_amount'] = (float)$row['total_amount'];
-    $row['time_per_unit'] = $row['time_per_unit'] !== null ? (int)$row['time_per_unit'] : 0;
-    $row['remaining'] = $row['total_amount'];  // 剩余分配量
-
-    if ($row['time_per_unit'] <= 0) {
-        // 无耗时信息的作业无法参与分配
-        continue;
-    }
-
-    $row['total_minutes'] = $row['total_amount'] * $row['time_per_unit'];
-    $totalWorkMinutes += $row['total_minutes'];
-    $homework[] = $row;
-}
-
-if (empty($homework)) {
-    http_response_code(400);
-    echo json_encode(['error' => '请先录入至少一条有耗时信息的作业', 'code' => 'NO_HOMEWORK']);
-    exit;
-}
-
-// --- 2. 获取日程配置 ---
-$weeklyStmt = $conn->prepare(
-    'SELECT day_of_week, start_time, end_time FROM schedule_weekly WHERE user_id = ?'
-);
-$weeklyStmt->bind_param('i', $userId);
-$weeklyStmt->execute();
-$weeklyResult = $weeklyStmt->get_result();
+// === 日程过滤 ===
 $weeklySchedule = [];
-while ($row = $weeklyResult->fetch_assoc()) {
-    $row['day_of_week'] = (int)$row['day_of_week'];
-    $weeklySchedule[] = $row;
-}
+$ws = $conn->prepare('SELECT day_of_week, start_time, end_time FROM schedule_weekly WHERE user_id = ?');
+$ws->bind_param('i', $userId);
+$ws->execute(); while ($r = $ws->get_result()->fetch_assoc()) { $r['day_of_week'] = (int)$r['day_of_week']; $weeklySchedule[] = $r; }
 
-$specialStmt = $conn->prepare(
-    'SELECT date_from, date_to, start_time, end_time FROM schedule_special WHERE user_id = ?'
-);
-$specialStmt->bind_param('i', $userId);
-$specialStmt->execute();
-$specialResult = $specialStmt->get_result();
 $specialSchedule = [];
-while ($row = $specialResult->fetch_assoc()) {
-    $specialSchedule[] = $row;
-}
-
-// --- 3. 生成日期列表并过滤 ---
-$dailyStartMinutes = timeToMinutes($dailyStartTime);
-$dailyEndMinutes = timeToMinutes($dailyEndTime);
+$ss = $conn->prepare('SELECT date_from, date_to, start_time, end_time FROM schedule_special WHERE user_id = ?');
+$ss->bind_param('i', $userId);
+$ss->execute(); while ($r = $ss->get_result()->fetch_assoc()) { $specialSchedule[] = $r; }
 
 $dates = [];
 $totalAvailableMinutes = 0;
 
 for ($d = $startTs; $d <= $endTs; $d += 86400) {
     $dateStr = date('Y-m-d', $d);
-    $dow = (int)date('w', $d); // 0=Sun
+    $dow = (int)date('w', $d);
+    $blocked = false;
+    $blockedMin = 0;
 
-    // 检查是否是全天休息/占用日
-    $isFullDayBlocked = false;
-    $blockedMinutes = 0;
-
-    // 每周固定
-    foreach ($weeklySchedule as $ws) {
-        if ($ws['day_of_week'] === $dow) {
-            if ($ws['start_time'] === null && $ws['end_time'] === null) {
-                // 全天占用
-                $isFullDayBlocked = true;
-                break;
-            }
-            // 部分时段占用
-            $bs = timeToMinutes($ws['start_time']);
-            $be = timeToMinutes($ws['end_time']);
-            $blockedMinutes += max(0, min($be, $dailyEndMinutes) - max($bs, $dailyStartMinutes));
+    foreach ($weeklySchedule as $wsItem) {
+        if ($wsItem['day_of_week'] === $dow) {
+            if ($wsItem['start_time'] === null && $wsItem['end_time'] === null) { $blocked = true; break; }
+            $bs = timeToMinutes($wsItem['start_time']); $be = timeToMinutes($wsItem['end_time']);
+            $blockedMin += max(0, $be - $bs);
         }
     }
+    if ($blocked) continue;
 
-    if ($isFullDayBlocked) continue;
-
-    // 特殊日期
-    foreach ($specialSchedule as $ss) {
-        $ssFrom = $ss['date_from'];
-        $ssTo = $ss['date_to'] ?? $ss['date_from'];
-        if ($dateStr >= $ssFrom && $dateStr <= $ssTo) {
-            if ($ss['start_time'] === null && $ss['end_time'] === null) {
-                $isFullDayBlocked = true;
-                break;
-            }
-            $bs = timeToMinutes($ss['start_time']);
-            $be = timeToMinutes($ss['end_time']);
-            $blockedMinutes += max(0, min($be, $dailyEndMinutes) - max($bs, $dailyStartMinutes));
+    foreach ($specialSchedule as $ssItem) {
+        if ($dateStr >= $ssItem['date_from'] && $dateStr <= ($ssItem['date_to'] ?? $ssItem['date_from'])) {
+            if ($ssItem['start_time'] === null && $ssItem['end_time'] === null) { $blocked = true; break; }
+            $bs = timeToMinutes($ssItem['start_time']); $be = timeToMinutes($ssItem['end_time']);
+            $blockedMin += max(0, $be - $bs);
         }
     }
+    if ($blocked) continue;
 
-    if ($isFullDayBlocked) continue;
-
-    $availableMinutes = max(0, ($dailyEndMinutes - $dailyStartMinutes) - $blockedMinutes);
-    if ($availableMinutes <= 0) continue;
-
-    $dates[] = [
-        'date' => $dateStr,
-        'availableMinutes' => $availableMinutes,
-        'allocatedMinutes' => 0,
-        'tasks' => [],
-    ];
-    $totalAvailableMinutes += $availableMinutes;
+    $avail = max(0, 14 * 60 - $blockedMin); // 14h default
+    if ($avail <= 0) continue;
+    $dates[] = ['date' => $dateStr, 'idx' => count($dates)];
+    $totalAvailableMinutes += $avail;
 }
 
-$availableDays = count($dates);
+$N = count($dates);
+if ($N === 0) { http_response_code(400); echo json_encode(['error' => '无可用日期', 'code' => 'NO_AVAILABLE_DAYS']); exit; }
 
-if ($availableDays === 0) {
+// === 权重曲线 ===
+$weights = [];
+for ($i = 0; $i < $N; $i++) {
+    $t = ($N > 1) ? $i / ($N - 1) : 0.5;
+    switch ($rhythm) {
+        case -2: $w = 1 - 0.7 * $t; break;
+        case -1: $w = 1 - 0.35 * $t; break;
+        case 1:  $w = 0.65 + 0.35 * $t; break;
+        case 2:  $w = 0.3 + 0.7 * $t; break;
+        default: $w = 1.0;
+    }
+    $weights[] = max(0.01, $w);
+}
+
+// === 获取作业 ===
+$hwStmt = $conn->prepare(
+    'SELECT id, subject, task_type, total_amount, unit, time_per_unit, window_start, window_end, locked FROM homework WHERE plan_id = ? AND user_id = ?'
+);
+$hwStmt->bind_param('ii', $planId, $userId);
+$hwStmt->execute();
+$homeworkRows = $hwStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+$overridesMap = [];
+foreach ($homeworkOverrides as $ov) { $hid = (int)($ov['homeworkId'] ?? 0); if ($hid > 0) $overridesMap[$hid] = $ov; }
+
+$homework = [];
+foreach ($homeworkRows as $row) {
+    $row['id'] = (int)$row['id'];
+    $row['total_amount'] = (float)$row['total_amount'];
+    $row['time_per_unit'] = $row['time_per_unit'] !== null ? (int)$row['time_per_unit'] : 0;
+    if ($row['time_per_unit'] <= 0) continue;
+    $hid = $row['id'];
+    if (isset($overridesMap[$hid])) {
+        $ov = $overridesMap[$hid];
+        $row['window_start'] = $ov['windowStart'] ?? $row['window_start'];
+        $row['window_end'] = $ov['windowEnd'] ?? $row['window_end'];
+        $row['locked'] = isset($ov['locked']) ? (int)$ov['locked'] : (int)$row['locked'];
+    }
+    $homework[] = $row;
+}
+
+if (empty($homework)) {
     http_response_code(400);
-    echo json_encode(['error' => '所选日期范围内没有可用学习日，请调整日程或日期范围', 'code' => 'NO_AVAILABLE_DAYS']);
+    echo json_encode(['error' => '请先录入作业', 'code' => 'NO_HOMEWORK']);
     exit;
 }
 
-// --- 4. 检查总工时 ---
-if ($totalWorkMinutes > $totalAvailableMinutes) {
-    http_response_code(400);
-    echo json_encode([
-        'error' => "总工时 {$totalWorkMinutes} 分钟超出可用 {$totalAvailableMinutes} 分钟（{$availableDays} 天），请减少作业或扩大日期范围",
-        'code' => 'INSUFFICIENT_TIME',
-        'totalWorkMinutes' => $totalWorkMinutes,
-        'totalAvailableMinutes' => $totalAvailableMinutes,
-        'availableDays' => $availableDays,
-    ]);
-    exit;
-}
+// === 分配算法（同 preview.php）===
+$allocation = []; for ($i = 0; $i < $N; $i++) $allocation[$i] = [];
+$warnings = [];
 
-// --- 5. 整数单位分配算法 ---
-// 对每科作业：base = floor(totalUnits / availableDays)
-// 余数 = totalUnits % availableDays → 前余数天各多分配 1 单位
-// 再用每日可用分钟校验，超限则自动延后
-
-$allocation = []; // [dayIndex][hwIdx] => units
-for ($d = 0; $d < $availableDays; $d++) {
-    $allocation[$d] = [];
-}
-
-// 为每科作业分配整数单位
 foreach ($homework as $hwIdx => $hw) {
     $totalUnits = (int)$hw['total_amount'];
-    if ($totalUnits <= 0 || $hw['time_per_unit'] <= 0) continue;
+    if ($totalUnits <= 0) continue;
+    $winStart = $hw['window_start'] ?? $startDate;
+    $winEnd = $hw['window_end'] ?? $endDate;
 
-    $base = (int)($totalUnits / $availableDays);
-    $extra = $totalUnits % $availableDays;
-
-    for ($d = 0; $d < $availableDays; $d++) {
-        $units = $base + ($d < $extra ? 1 : 0);
-        if ($units > 0) {
-            $allocation[$d][$hwIdx] = $units;
-        }
+    $windowIndices = [];
+    foreach ($dates as $di => $day) {
+        if ($day['date'] >= $winStart && $day['date'] <= $winEnd) $windowIndices[] = $di;
     }
+    if (empty($windowIndices)) continue;
+
+    $totalWeight = 0; $windowWeights = [];
+    foreach ($windowIndices as $di) { $w = $weights[$di]; $windowWeights[$di] = $w; $totalWeight += $w; }
+    if ($totalWeight <= 0) continue;
+
+    $raw = []; $rawTotal = 0;
+    foreach ($windowIndices as $di) {
+        $frac = $totalUnits * $windowWeights[$di] / $totalWeight;
+        $intPart = (int)$frac;
+        $raw[$di] = ['int' => $intPart, 'frac' => $frac - $intPart];
+        $rawTotal += $intPart;
+    }
+    $remaining = $totalUnits - $rawTotal;
+    if ($remaining > 0) {
+        uasort($raw, fn($a, $b) => $b['frac'] <=> $a['frac']);
+        foreach ($raw as &$v) { if ($remaining <= 0) break; $v['int']++; $remaining--; }
+        unset($v);
+    }
+    foreach ($raw as $di => $v) { if ($v['int'] > 0) $allocation[$di][$hwIdx] = $v['int']; }
 }
 
-// 校验每日工时并自动延后超限部分
-for ($d = 0; $d < $availableDays; $d++) {
-    // 计算该天总分钟
+// 超限溢出
+for ($di = 0; $di < $N; $di++) {
     $dayMinutes = 0;
-    foreach ($allocation[$d] as $hwIdx => $units) {
-        $dayMinutes += $units * $homework[$hwIdx]['time_per_unit'];
-    }
+    foreach ($allocation[$di] as $hwIdx => $units) $dayMinutes += $units * $homework[$hwIdx]['time_per_unit'];
+    if ($dayMinutes <= $maxDailyMinutes) continue;
 
-    $available = $dates[$d]['availableMinutes'];
+    $hwIndices = array_keys($allocation[$di]);
+    usort($hwIndices, fn($a, $b) => ($allocation[$di][$b] * $homework[$b]['time_per_unit']) - ($allocation[$di][$a] * $homework[$a]['time_per_unit']));
 
-    if ($dayMinutes > $available) {
-        // 超限：尝试移一个单位到后续有容量的日期
-        $hwIndicesInDay = array_keys($allocation[$d]);
-        // 按耗时降序排列（先移最耗时的任务）
-        usort($hwIndicesInDay, function ($a, $b) use ($allocation, $d, $homework) {
-            $ta = $allocation[$d][$a] * $homework[$a]['time_per_unit'];
-            $tb = $allocation[$d][$b] * $homework[$b]['time_per_unit'];
-            return $tb - $ta;
-        });
-
-        foreach ($hwIndicesInDay as $hwIdx) {
-            $hwUnitMinutes = $homework[$hwIdx]['time_per_unit'];
-
-            while (($allocation[$d][$hwIdx] ?? 0) > 0 && $dayMinutes > $available) {
-                $moved = false;
-
-                for ($td = $d + 1; $td < $availableDays; $td++) {
-                    // 计算目标日剩余容量
-                    $targetMinutes = 0;
-                    foreach ($allocation[$td] as $tid => $tunits) {
-                        $targetMinutes += $tunits * $homework[$tid]['time_per_unit'];
-                    }
-                    $targetCapacity = $dates[$td]['availableMinutes'] - $targetMinutes;
-
-                    if ($targetCapacity >= $hwUnitMinutes) {
-                        // 移动一个单位到这天
-                        $allocation[$d][$hwIdx]--;
-                        $allocation[$td][$hwIdx] = ($allocation[$td][$hwIdx] ?? 0) + 1;
-                        $dayMinutes -= $hwUnitMinutes;
-                        $moved = true;
-                        break;
-                    }
+    foreach ($hwIndices as $hwIdx) {
+        $uMin = $homework[$hwIdx]['time_per_unit'];
+        while (($allocation[$di][$hwIdx] ?? 0) > 0 && $dayMinutes > $maxDailyMinutes) {
+            $moved = false;
+            foreach ([$di - 1, $di + 1] as $td) {
+                if ($td < 0 || $td >= $N) continue;
+                $tMin = 0; foreach ($allocation[$td] as $tid => $tu) $tMin += $tu * $homework[$tid]['time_per_unit'];
+                if ($tMin + $uMin <= $maxDailyMinutes) {
+                    $allocation[$di][$hwIdx]--; $allocation[$td][$hwIdx] = ($allocation[$td][$hwIdx] ?? 0) + 1;
+                    $dayMinutes -= $uMin; $moved = true; break;
                 }
-
-                if (!$moved) break; // 没有可移入的日期，停止尝试
             }
-        }
-
-        // 二次校验
-        $finalMinutes = 0;
-        foreach ($allocation[$d] as $hwIdx => $units) {
-            $finalMinutes += $units * $homework[$hwIdx]['time_per_unit'];
-        }
-
-        if ($finalMinutes > $available) {
-            $dateStr = $dates[$d]['date'];
-            http_response_code(400);
-            echo json_encode([
-                'error' => "{$dateStr} 超出可用时长（{$available} 分钟），请增加可用时段或减少作业量",
-                'code' => 'DAILY_OVERFLOW',
-                'date' => $dateStr,
-                'allocated' => $finalMinutes,
-                'available' => $available,
-            ]);
-            exit;
+            if (!$moved) break;
         }
     }
+    $finalMin = 0; foreach ($allocation[$di] as $hwIdx => $units) $finalMin += $units * $homework[$hwIdx]['time_per_unit'];
+    if ($finalMin > $maxDailyMinutes) $warnings[] = $dates[$di]['date'] . " 超出上限 {$maxDailyMinutes}分钟（{$finalMin}分钟）";
 }
 
-// 构建 dates 输出
-error_log("Plan: totalWork={$totalWorkMinutes}, availableDays={$availableDays}");
-
-foreach ($dates as $d => &$day) {
-    $day['tasks'] = [];
-    $day['allocatedMinutes'] = 0;
-
-    foreach ($allocation[$d] as $hwIdx => $units) {
-        if ($units <= 0) continue;
-
-        $hw = $homework[$hwIdx];
-        $actualMinutes = $units * $hw['time_per_unit'];
-
-        $day['tasks'][] = [
-            'homework_id' => $hw['id'],
-            'subject' => $hw['subject'],
-            'task_type' => $hw['task_type'],
-            'amount' => $units,
-            'unit' => $hw['unit'],
-            'estimated_minutes' => $actualMinutes,
-        ];
-        $day['allocatedMinutes'] += $actualMinutes;
-    }
-
-    // 按 subject 字母序排列当天任务
-    usort($day['tasks'], function ($a, $b) {
-        return strcmp($a['subject'], $b['subject']);
-    });
-}
-unset($day);
-
-// --- 6. 写入数据库 ---
+// === 写入 DB ===
 $conn->begin_transaction();
-
 try {
-    if ($planId <= 0) {
-        // 新建计划
-        $stmt = $conn->prepare(
-            'INSERT INTO plans (user_id, name, start_date, end_date, daily_start_time, daily_end_time, strategy) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        );
-        $stmt->bind_param('issssss', $userId, $planName, $startDate, $endDate, $dailyStartTime, $dailyEndTime, $strategy);
-        $stmt->execute();
-        $planId = $stmt->insert_id;
-    }
-    // 如果是已有 plan，先清空该计划的旧 plan_tasks（重新生成）
-    if ($planId > 0) {
-        $delStmt = $conn->prepare('DELETE FROM plan_tasks WHERE plan_id = ?');
-        $delStmt->bind_param('i', $planId);
-        $delStmt->execute();
-    }
+    // 删除非锁定的未完成任务（保留已完成 + 锁定）
+    $del = $conn->prepare('DELETE pt FROM plan_tasks pt
+        JOIN homework h ON h.id = pt.homework_id AND h.plan_id = ?
+        WHERE pt.plan_id = ? AND (h.locked = 0 OR pt.completed = 0)');
+    $del->bind_param('ii', $planId, $planId);
+    $del->execute();
 
+    // 写入新任务
     $taskStmt = $conn->prepare(
-        'INSERT INTO plan_tasks (plan_id, homework_id, date, amount, estimated_minutes, sort_order) 
-         VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO plan_tasks (plan_id, homework_id, date, amount, estimated_minutes, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
     );
-
     $sortOrder = 0;
-    foreach ($dates as $day) {
-        if (empty($day['tasks'])) continue; // 跳过没有任务的空白天
-        foreach ($day['tasks'] as $task) {
-            $taskStmt->bind_param(
-                'iisdii',
-                $planId,
-                $task['homework_id'],
-                $day['date'],
-                $task['amount'],
-                $task['estimated_minutes'],
-                $sortOrder
-            );
+    $createdTasks = 0;
+    foreach ($dates as $di => $day) {
+        foreach ($allocation[$di] as $hwIdx => $units) {
+            if ($units <= 0) continue;
+            $hw = $homework[$hwIdx];
+            $estMin = $units * $hw['time_per_unit'];
+            $taskStmt->bind_param('iisdii', $planId, $hw['id'], $day['date'], $units, $estMin, $sortOrder);
             $taskStmt->execute();
-            $sortOrder++;
+            $sortOrder++; $createdTasks++;
         }
     }
 
     $conn->commit();
-
     echo json_encode([
         'planId' => $planId,
         'name' => $planName,
-        'startDate' => $startDate,
-        'endDate' => $endDate,
-        'totalWorkMinutes' => $totalWorkMinutes,
-        'availableDays' => $availableDays,
-        'totalAvailableMinutes' => $totalAvailableMinutes,
+        'createdTasks' => $createdTasks,
+        'warnings' => $warnings,
     ], JSON_UNESCAPED_UNICODE);
 
 } catch (Exception $e) {
     $conn->rollback();
     http_response_code(500);
-    echo json_encode(['error' => '生成计划失败: ' . $e->getMessage(), 'code' => 'DB_ERROR']);
+    echo json_encode(['error' => '生成失败: ' . $e->getMessage(), 'code' => 'DB_ERROR']);
 }
 
-// --- 工具函数 ---
 function timeToMinutes(?string $time): int {
     if ($time === null) return 0;
     $parts = explode(':', $time);

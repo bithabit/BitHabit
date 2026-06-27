@@ -28,6 +28,9 @@ $tables = [
         total_amount DECIMAL(10,2) NOT NULL,
         unit VARCHAR(20) NOT NULL,
         time_per_unit INT DEFAULT NULL,
+        window_start DATE DEFAULT NULL,
+        window_end DATE DEFAULT NULL,
+        locked TINYINT(1) DEFAULT 0,
         notes TEXT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

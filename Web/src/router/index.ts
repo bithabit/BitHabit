@@ -27,6 +27,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/plan/:id/allocate',
+    name: 'planAllocate',
+    component: () => import('../views/PlanAllocateView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/plan/:planId/calendar',
     name: 'planCalendar',
     component: () => import('../views/CalendarView.vue'),
