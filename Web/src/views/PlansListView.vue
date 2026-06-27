@@ -59,6 +59,7 @@
               <span class="progress-text">{{ plan.completed_count }}/{{ plan.task_count }}</span>
             </div>
           </div>
+          <button class="btn-delete-archive" @click.stop="handleDeleteArchived(plan)">🗑 删除</button>
         </div>
       </div>
     </template>
@@ -95,9 +96,18 @@ async function handleArchive(plan: PlanListItem) {
   if (!confirm(`归档「${plan.name}」？归档后不再出现在今日页面。`)) return
   const res = await planApi.archive(plan.id)
   if (res.ok) {
-    // 重新加载列表
     const listRes = await planApi.list()
     if (listRes.ok) plans.value = listRes.data.plans
+  }
+}
+
+async function handleDeleteArchived(plan: PlanListItem) {
+  if (!confirm(`确定删除「${plan.name}」？
+
+此操作不可撤销，将一并删除该计划下的所有作业和任务。`)) return
+  const res = await planApi.remove(plan.id)
+  if (res.ok) {
+    plans.value = plans.value.filter(p => p.id !== plan.id)
   }
 }
 
@@ -175,6 +185,18 @@ onMounted(async () => {
   cursor: pointer; font-family: var(--font-family); border-radius: 0 var(--radius) var(--radius) 0;
 }
 .btn-archive:hover { color: var(--color-error); background: var(--color-error-bg); }
+
+.btn-delete-archive {
+  padding: 10px 16px; border: none; border-left: 1px solid var(--color-border);
+  background: none; color: var(--color-error); font-size: 0.8125rem;
+  cursor: pointer; font-family: var(--font-family);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  white-space: nowrap;
+}
+.btn-delete-archive:hover { background: var(--color-error-bg); }
+
+.plan-card-archived.plan-card-archived { display: flex; }
+.plan-card-archived .plan-main { flex: 1; }
 
 .empty-state {
   display: flex; flex-direction: column; align-items: center;

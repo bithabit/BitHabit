@@ -22,16 +22,6 @@
             <input type="date" v-model="endDate" />
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group flex-1">
-            <label>每日开始</label>
-            <input type="time" v-model="dailyStartTime" />
-          </div>
-          <div class="form-group flex-1">
-            <label>每日结束</label>
-            <input type="time" v-model="dailyEndTime" />
-          </div>
-        </div>
         <div class="form-actions">
           <button class="btn-primary btn-press" :disabled="!step1Valid" @click="step1Next">
             下一步：录入作业 →
@@ -149,8 +139,7 @@ const stepTitle = computed(() => ['', '创建新计划', '录入作业'][step.va
 const planName = ref('暑假作业计划')
 const startDate = ref('')
 const endDate = ref('')
-const dailyStartTime = ref('08:00')
-const dailyEndTime = ref('22:00')
+
 const createdPlanId = ref(0)
 
 const step1Valid = computed(() => startDate.value && endDate.value)
@@ -192,8 +181,6 @@ async function step1Next() {
     name: planName.value,
     startDate: startDate.value,
     endDate: endDate.value,
-    dailyStartTime: dailyStartTime.value + ':00',
-    dailyEndTime: dailyEndTime.value + ':00',
   })
   if (res.ok) {
     createdPlanId.value = res.data.id
@@ -266,8 +253,6 @@ async function handleGenerate() {
     planId: createdPlanId.value,
     startDate: startDate.value,
     endDate: endDate.value,
-    dailyStartTime: dailyStartTime.value + ':00',
-    dailyEndTime: dailyEndTime.value + ':00',
   })
 
   generating.value = false
