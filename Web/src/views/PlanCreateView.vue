@@ -106,7 +106,8 @@
       <p>日期范围：{{ result.startDate }} ~ {{ result.endDate }}</p>
       <p>可用天数：{{ result.availableDays }} 天</p>
       <p>总工时：{{ result.totalWorkMinutes }} 分钟</p>
-      <button class="btn-primary" @click="viewPlan">查看计划详情 →</button>
+      <button class="btn-primary" @click="viewPlan">返回计划列表 →</button>
+      <button class="btn-outline" @click="viewDetail">查看计划详情</button>
     </div>
   </div>
 </template>
@@ -177,6 +178,10 @@ async function handleGenerate() {
 }
 
 function viewPlan() {
+  router.push('/plans')
+}
+
+function viewDetail() {
   if (result.value) {
     router.push(`/plan/${result.value.planId}`)
   }
@@ -355,6 +360,22 @@ h3 {
   border-radius: var(--radius-sm);
   background: var(--color-primary);
   color: #fff;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-family);
+  text-align: center;
+}
+
+.btn-outline {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-primary);
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;

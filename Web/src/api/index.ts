@@ -275,11 +275,58 @@ export interface PlanGenerateResult {
   totalAvailableMinutes: number
 }
 
+// --- 计划列表 & 今日任务类型 ---
+
+export interface PlanListItem {
+  id: number
+  name: string
+  start_date: string
+  end_date: string
+  strategy: string
+  task_count: number
+  completed_count: number
+  created_at: string
+}
+
+export interface TodayTask {
+  id: number
+  subject: string
+  taskType: string
+  amount: number
+  unit: string
+  estimatedMinutes: number
+  completed: boolean
+}
+
+export interface TodayData {
+  planId: number | null
+  planName: string | null
+  date: string
+  tasks: TodayTask[]
+}
+
 export const planApi = {
   generate(input: PlanGenerateInput) {
     return request<PlanGenerateResult>('POST', '/plans/generate.php', input as unknown as Record<string, unknown>, 30000)
   },
   detail(planId: number) {
     return request<PlanDetail>('GET', `/plans/detail.php?id=${planId}`)
+  },
+
+  /** 计划列表 */
+  list() {
+    return request<{ plans: PlanListItem[] }>('GET', '/plans/list.php')
+  },
+
+  /** 今日任务 */
+  today() {
+    return request<TodayData>('GET', '/plans/today.php')
+  },
+
+  /** 切换任务完成状态 */
+  toggleTask(taskId: number) {
+    return request<{ id: number; completed: boolean; completedAt: string | null }>(
+      'PATCH', '/plans/tasks/toggle.php', { id: taskId }
+    )
   },
 }
