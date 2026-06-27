@@ -29,6 +29,10 @@
         <div class="sum-date">每日 {{ plan.daily_start_time.slice(0,5) }} - {{ plan.daily_end_time.slice(0,5) }}</div>
       </section>
 
+      <router-link :to="`/plan/${plan.id}/calendar`" class="btn-calendar">
+        📅 日历视图
+      </router-link>
+
       <!-- 每日任务 -->
       <section class="days-list">
         <h3>📋 每日任务</h3>
@@ -278,5 +282,29 @@ function formatAmount(n: number): string {
   color: var(--color-text-placeholder);
   font-size: 0.75rem;
   flex-shrink: 0;
+}
+
+.btn-calendar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px;
+  margin-bottom: 16px;
+  background: var(--color-card);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-primary);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-family);
+  text-decoration: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.btn-calendar:active {
+  border-color: var(--color-primary);
+  background: rgba(79, 70, 229, 0.04);
 }
 </style>

@@ -1,13 +1,36 @@
 # BitHabit - 任务清单
 
-> 最后更新：2026-06-27 11:36 CST  
-> 状态：执行中  
+> 最后更新：2026-06-27  
 > 执行者：Coder Agent  
 > 来源：Designer Agent
 
+## ⚠️ 执行规则
+
+**Coder 完成任务后必须通过飞书通道直接通知用户验收，不要通过 sessions_send 通知 Designer。**
+
 ---
 
-## TASK-003: UI 交互动画增强
+## 当前准确状态（Coder 确认，2026-06-27）
+
+| 模块 | 文件 | 状态 |
+|------|------|------|
+| 登录/注册 | LoginView / RegisterView + auth API | ✅ |
+| 作业录入（手动+AI） | HomeworkView.vue + `/api/ai/parse` | ✅ |
+| 日程配置 | ScheduleView.vue + schedule API | ✅ |
+| 计划生成（平均分配） | PlanCreateView.vue + generate API | ✅ |
+| 计划详情 | PlanDetailView.vue | ✅ |
+| 今日任务 | TodayView.vue + today API | ✅ |
+| 计划列表 | PlansListView.vue + list API | ✅ |
+| 底部导航三栏 | App.vue | ✅ |
+| UI 交互动画增强 | 全局动画 Token + 各页面动画 | ✅ |
+| 日历视图 | — | ❌ |
+| 拖拽调整 | — | ❌ |
+| 追赶/重新分配 | API 规格已有 | ❌ |
+| 社交/分享 | — | ❌ |
+
+---
+
+## TASK-004: 日历视图 — 计划月视图
 
 **优先级**：P0  
 **状态**：⏳ 待执行  
@@ -15,210 +38,271 @@
 
 ### 需求概述
 
-所有可点击的 UI 元素添加反馈动画：按钮按压、卡片点击、任务打卡、列表项操作等。让应用操作手感更「实」。
-
-### 统一动画规范
-
-| 动画类型 | 参数 | 用途 |
-|----------|------|------|
-| 按压反馈 | `transform: scale(0.97)` + `transition: 0.15s` | 所有可点击卡片、按钮 |
-| 弹簧进入 | `cubic-bezier(0.34, 1.56, 0.64, 1)` | 元素出现时（打卡✅、新卡片） |
-| 淡入上移 | `opacity 0→1` + `translateY(8px)→0` | 列表项依次入场 |
-| 震动反馈 | 短促 `translateX` ±3px | 删除确认、错误提示 |
+为计划提供月视图日历，让学生俯瞰整个暑假的任务分布。是后续拖拽调整的前置依赖。
 
 ### 子任务
 
----
+#### 4.1 新建后端 API：月度日历汇总 `GET /api/plans/calendar.php`
 
-#### 3.1 全局按钮按压效果
+**文件**：`api/plans/calendar.php`
 
-**方式**：在 `style.css` 添加全局 CSS 类，各页面引用。
+```
+GET /api/plans/calendar.php?planId=1&year=2026&month=7
+Authorization: Bearer <token>
 
-```css
-/* 按压缩放 */
-.btn-press {
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.btn-press:active {
-  transform: scale(0.97);
-}
-
-/* 可点击卡片 */
-.card-press {
-  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.card-press:active {
-  transform: scale(0.98);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+Response (200):
+{
+  "planId": 1,
+  "planName": "暑假作业计划",
+  "year": 2026,
+  "month": 7,
+  "startDate": "2026-07-01",
+  "endDate": "2026-08-30",
+  "days": [
+    {
+      "date": "2026-07-01",
+      "taskCount": 4,
+      "completedCount": 2,
+      "totalMinutes": 120
+    },
+    {
+      "date": "2026-07-05",
+      "taskCount": 0,
+      "completedCount": 0,
+      "totalMinutes": 0
+    }
+  ]
 }
 ```
 
-**执行范围**：不需要修改每个页面，改为在 `App.vue` 添加全局规则覆盖常见可点击元素。
+**SQL 逻辑**：
+```sql
+-- 仅返回有数据的日期；前端自行生成完整月网格
+SELECT date, COUNT(*) as task_count, 
+       SUM(CASE WHEN completed = 1 THEN 1 ELSE 0 END) as completed_count,
+       SUM(estimated_minutes) as total_minutes
+FROM plan_tasks 
+WHERE plan_id = ? AND YEAR(date) = ? AND MONTH(date) = ?
+GROUP BY date
+ORDER BY date
+```
 
----
+- 需验证 plan 属于当前用户
+- `days` 数组仅包含有任务的日期（taskCount=0 代表休息日）
+- 无任务的日期不出现在数组中，前端渲染为空
+- `startDate`/`endDate` 来自 plans 表，前端用于判断日期是否在计划范围内
 
-#### 3.2 今日任务页打卡动画
+#### 4.2 新建后端 API：单日任务列表 `GET /api/plans/day.php`
 
-**文件**：`src/views/TodayView.vue`
+**文件**：`api/plans/day.php`
 
-| 交互 | 当前 | 目标 |
+```
+GET /api/plans/day.php?planId=1&date=2026-07-15
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "planId": 1,
+  "date": "2026-07-15",
+  "tasks": [
+    {
+      "id": 42,
+      "subject": "数学",
+      "taskType": "模拟卷",
+      "amount": 0.5,
+      "unit": "套",
+      "estimatedMinutes": 45,
+      "completed": false
+    }
+  ]
+}
+```
+
+- 查 `plan_tasks` WHERE `plan_id=? AND date=?`，JOIN `homework` 获取科目/类型
+- 需验证 plan 属于当前用户
+- 空任务返回 `tasks: []`
+
+#### 4.3 更新前端 API 客户端
+
+**文件**：`src/api/index.ts`
+
+```typescript
+// 新增类型
+export interface CalendarDay {
+  date: string
+  taskCount: number
+  completedCount: number
+  totalMinutes: number
+}
+
+export interface CalendarData {
+  planId: number
+  planName: string
+  year: number
+  month: number
+  startDate: string
+  endDate: string
+  days: CalendarDay[]
+}
+
+// planApi 新增方法
+/** 月度日历汇总 */
+calendar(planId: number, year: number, month: number) {
+  return request<CalendarData>('GET', `/plans/calendar.php?planId=${planId}&year=${year}&month=${month}`)
+},
+
+/** 单日任务列表 */
+getDay(planId: number, date: string) {
+  return request<{ planId: number; date: string; tasks: TodayTask[] }>('GET', `/plans/day.php?planId=${planId}&date=${date}`)
+},
+```
+
+#### 4.4 新建页面：日历视图 `CalendarView.vue`
+
+**文件**：`src/views/CalendarView.vue`
+
+**页面布局**：
+
+```
+┌─────────────────────────────────┐
+│  ← 2026年 7月 →                 │  月份导航
+│  暑假作业计划                    │  计划名称（小字）
+├─────────────────────────────────┤
+│  一  二  三  四  五  六  日      │  星期头
+├─────────────────────────────────┤
+│      1   2   3   4   5   6      │
+│      4/2 3/0 休  2/1 6/3  —     │  月网格
+│                                 │
+│  7   8   9  10  11  12  13      │
+│ 4/2 5/3 3/1 2/2 休  4/0 1/1     │
+│                                 │
+│ 14  15  16  17  18  19  20      │
+│ 3/1  🏖  2/2 4/3 1/0  —   —     │
+│                                 │
+│ 21  22  23  24  25  26  27      │
+│ 5/2 3/1 1/1 休  2/0 4/3 3/2     │
+│                                 │
+│ 28  29  30  31                  │
+│ 2/1 1/1 3/2  —                  │
+├─────────────────────────────────┤
+│ 图例：完成/总数  休=休息日  —=不在计划范围  │
+└─────────────────────────────────┘
+```
+
+**日期格子的状态**：
+
+| 状态 | 视觉 | 条件 |
 |------|------|------|
-| 点击任务卡片切换完成 | 瞬时变化 | ✅ 弹簧弹出 + 卡片微动画 |
-| 已完成任务 | 静态灰色 | 添加划线渐变动画 |
-| 无任务空状态 | 静态 | 图标轻微浮动 |
+| 有任务 | 数字 + 完成/总数 | `taskCount > 0` |
+| 全部完成 | 数字 + ✅，绿色背景 | `taskCount > 0 && completedCount == taskCount` |
+| 休息日 | 数字，「休」标记，灰色 | 在计划范围内但无任务 |
+| 今日 | 蓝色边框/高亮 | `date === today` |
+| 过去 | 降低透明度 | `date < today` |
+| 超出范围 | 数字变极淡 | 不在 `startDate ~ endDate` 之间 |
 
-**打卡时动画**：
-```css
-/* ✅ 打卡弹簧动画 */
-.task-check-bounce {
-  animation: checkBounce 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-@keyframes checkBounce {
-  0% { transform: scale(0); }
-  60% { transform: scale(1.3); }
-  100% { transform: scale(1); }
+**功能点**：
+
+1. **月份导航**：左右箭头切换月份，不能早于/晚于计划范围
+2. **日历网格**：7列×5~6行，周一开头，补齐前置空白
+3. **点击日期**：底部弹出半屏面板（Bottom Sheet），显示该日任务列表 + 支持打卡切换
+4. **图例**：底部固定一行
+5. **路由**：`/plan/:planId/calendar`，支持 `?month=2026-07`
+
+**组件建议**：拆 `DayCell.vue` 子组件（date/dayNumber/taskCount/completedCount/totalMinutes/isToday/isPast/isInRange）
+
+**计算逻辑**（前端构建月网格）：
+```typescript
+function buildMonthGrid(year: number, month: number, calendarData: CalendarData) {
+  const firstDay = new Date(year, month - 1, 1)
+  const lastDay = new Date(year, month, 0)
+  const startDow = firstDay.getDay()  // 0=周日
+  const startCol = startDow === 0 ? 6 : startDow - 1  // 周一为第0列
+  
+  const daysMap = new Map(calendarData.days.map(d => [d.date, d]))
+  const today = new Date().toISOString().slice(0, 10)
+  const cells = []
+  
+  // 前置空白
+  for (let i = 0; i < startCol; i++) cells.push(null)
+  
+  // 月内日期
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+    const dayData = daysMap.get(dateStr)
+    cells.push({
+      date: dateStr,
+      dayNumber: d,
+      taskCount: dayData?.taskCount ?? 0,
+      completedCount: dayData?.completedCount ?? 0,
+      totalMinutes: dayData?.totalMinutes ?? 0,
+      isToday: dateStr === today,
+      isPast: dateStr < today,
+      isInRange: dateStr >= calendarData.startDate && dateStr <= calendarData.endDate,
+    })
+  }
+  
+  return cells
 }
 ```
 
-**空状态浮动**：
-```css
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
-}
-.empty-icon-float {
-  animation: float 3s ease-in-out infinite;
-}
-```
+#### 4.5 更新路由配置
 
----
+**文件**：`src/router/index.ts`
 
-#### 3.3 作业页交互动画
-
-**文件**：`src/views/HomeworkView.vue`
-
-| 交互 | 当前 | 目标 |
-|------|------|------|
-| 作业卡片出现/消失 | 瞬时 | 淡入上移 / 滑出收缩 |
-| 删除确认 | 原生 `confirm()` | 底部弹出确认面板 |
-| 表单展开/折叠 | 瞬时 | 高度过渡展开 |
-
-**作业卡片入场**（新添加时）：
-```css
-.homework-card-enter {
-  animation: fadeInUp 0.35s ease both;
-}
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+```typescript
+{
+  path: '/plan/:planId/calendar',
+  name: 'planCalendar',
+  component: () => import('../views/CalendarView.vue'),
+  meta: { requiresAuth: true },
 }
 ```
 
-**表单展开**：给 `.form-section` 加 `transition: all 0.3s ease`
+#### 4.6 计划详情页添加入口
 
----
+**文件**：`src/views/PlanDetailView.vue`
 
-#### 3.4 日程配置页动画
-
-**文件**：`src/views/ScheduleView.vue`
-
-| 交互 | 当前 | 目标 |
-|------|------|------|
-| 日程项添加/删除 | 瞬时 | 淡入上移 / 淡出左移 |
-| 添加表单展开 | `<details>` 原生展开 | 高度过渡 + 图标旋转 |
-| AI 解析结果出现 | 瞬时 | 依次淡入 |
-
----
-
-#### 3.5 计划列表页动画
-
-**文件**：`src/views/PlansListView.vue`
-
-| 交互 | 当前 | 目标 |
-|------|------|------|
-| 计划卡片列表 | 静态 | 依次淡入上移（stagger） |
-| 进度条 | 静态 | 宽度过渡 |
-| 新建卡片 | 静态 | 按压缩放 |
-
-**进度条已有 transition，无需改动。**
-
-**列表 stagger 动画**：
-```css
-.plan-card {
-  animation: fadeInUp 0.4s ease both;
-}
-.plan-card:nth-child(1) { animation-delay: 0s; }
-.plan-card:nth-child(2) { animation-delay: 0.08s; }
-.plan-card:nth-child(3) { animation-delay: 0.16s; }
-.plan-card:nth-child(4) { animation-delay: 0.24s; }
-.plan-card:nth-child(5) { animation-delay: 0.32s; }
+在页面顶部增加「📅 日历视图」按钮：
+```html
+<router-link :to="`/plan/${plan.id}/calendar`" class="btn-calendar">
+  📅 日历视图
+</router-link>
 ```
 
 ---
 
-#### 3.6 计划生成页动画
+## 任务依赖
 
-**文件**：`src/views/PlanCreateView.vue`
-
-| 交互 | 当前 | 目标 |
-|------|------|------|
-| 生成按钮 | 静态 | 加载时 pulse + 完成后弹簧确认 |
-| 预览卡片出现 | 静态 | 淡入上移 |
-| 结果卡片 | 静态 | 从下方滑入 |
-
-**生成按钮加载态**（已有 spinner，增强）：
-- 按钮文字切换为「生成中...」时加轻微 pulse glow
-- 生成成功 → 按钮瞬间变绿色 + ✅ 再恢复
-
----
-
-#### 3.7 底部导航栏增强
-
-**文件**：`src/App.vue`
-
-| 交互 | 当前 | 目标 |
-|------|------|------|
-| Tab 切换回弹 | 仅有颜色+指示条 | 图标缩放弹簧 |
-| 长按效果 | 无 | 无（触摸目标不需要） |
-
-```css
-/* 导航图标点击弹簧 */
-.nav-item:active .nav-icon {
-  transform: scale(1.2);
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
+```
+4.1 (calendar API) ─┐
+                    ├──→ 4.3 (前端 API) ──→ 4.4 (CalendarView)
+4.2 (day API) ─────┘                        │
+                                             ├──→ 4.5 (路由)
+                                             └──→ 4.6 (详情页入口)
 ```
 
----
-
-### 全局动画 Token（建议加入 `style.css` 的 `:root`）
-
-```css
-:root {
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
-  --duration-fast: 0.15s;
-  --duration-normal: 0.25s;
-  --duration-slow: 0.35s;
-}
-```
+**执行顺序**：4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6
 
 ---
 
-### 执行要点
+## 测试要点
 
-1. **先读 `style.css`**，在 `:root` 添加动画 Token
-2. **按 3.1 → 3.2 → 3.3 → 3.4 → 3.5 → 3.6 → 3.7 顺序**
-3. 每个页面改完后 `vite build` 验证不报错
-4. 不改动业务逻辑，只加动画 CSS + 少量 class 绑定
-5. 保持移动端性能：只用 `transform` 和 `opacity`，避免 `height/width` 动画
+- [ ] 月视图正确显示所有日期（对齐到周一）
+- [ ] 有任务日期显示完成/总数
+- [ ] 全部完成日期显示绿色 ✅
+- [ ] 休息日显示「休」标记
+- [ ] 今日日期蓝色高亮
+- [ ] 计划范围外日期灰色淡化
+- [ ] 左右箭头切换月份，边界正确
+- [ ] 点击有任务日期 → 弹出任务列表
+- [ ] 弹窗内点击切换完成状态
+- [ ] 弹窗外点击关闭
+- [ ] 计划详情页「日历视图」按钮可点击进入
 
 ---
 
 ## 历史任务
+- [x] 早期批次：登录/注册、作业录入、日程配置、计划生成、计划详情
 - [x] TASK-001 P0：APK 精简清理
-- [x] TASK-002：页面导航重构 — 今日/作业/计划
+- [x] TASK-002 P0：页面导航重构（今日/作业/计划）— commit `23e67b9`
+- [x] UI 交互动画增强 — 全局动画系统（弹簧/平滑/按压/stagger），commit `5d20d82`

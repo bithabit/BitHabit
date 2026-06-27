@@ -305,6 +305,25 @@ export interface TodayData {
   tasks: TodayTask[]
 }
 
+// --- 日历视图类型 ---
+
+export interface CalendarDay {
+  date: string
+  taskCount: number
+  completedCount: number
+  totalMinutes: number
+}
+
+export interface CalendarData {
+  planId: number
+  planName: string
+  year: number
+  month: number
+  startDate: string
+  endDate: string
+  days: CalendarDay[]
+}
+
 export const planApi = {
   generate(input: PlanGenerateInput) {
     return request<PlanGenerateResult>('POST', '/plans/generate.php', input as unknown as Record<string, unknown>, 30000)
@@ -328,5 +347,15 @@ export const planApi = {
     return request<{ id: number; completed: boolean; completedAt: string | null }>(
       'PATCH', '/plans/tasks/toggle.php', { id: taskId }
     )
+  },
+
+  /** 月度日历汇总 */
+  calendar(planId: number, year: number, month: number) {
+    return request<CalendarData>('GET', `/plans/calendar.php?planId=${planId}&year=${year}&month=${month}`)
+  },
+
+  /** 单日任务列表 */
+  getDay(planId: number, date: string) {
+    return request<{ planId: number; date: string; tasks: TodayTask[] }>('GET', `/plans/day.php?planId=${planId}&date=${date}`)
   },
 }
