@@ -5,9 +5,9 @@
       <h2>{{ stepTitle }}</h2>
     </header>
 
-    <!-- ========== Step 1: 分配策略 (合并折线图+节奏+排序) ========== -->
+    <!-- ========== Step 1: 分配策略 ========== -->
     <template v-if="step === 1">
-      <!-- 折线图 -->
+      <!-- 折线图 (堆叠柱状图) -->
       <section class="chart-card">
         <h3>📊 工作量预览</h3>
         <div class="chart-wrap">
@@ -23,13 +23,14 @@
             <line v-for="y in capLines" :key="y"
               :x1="0" :y1="y" :x2="chartW" :y2="y"
               stroke="#ef4444" stroke-dasharray="4,3" stroke-width="1" opacity="0.5"/>
-            <!-- 柱子 -->
-            <rect v-for="(bar, i) in stagedBars" :key="i"
-              :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h"
-              :fill="bar.over ? '#ef4444' : '#4F46E5'" rx="2"
-              opacity="0.8" class="bar-rect">
-              <title>{{ bar.label }}</title>
-            </rect>
+            <!-- 堆叠柱子 -->
+            <g v-for="(segs, i) in stagedSegments" :key="i">
+              <rect v-for="(seg, j) in segs" :key="j"
+                :x="seg.x" :y="seg.y" :width="seg.w" :height="seg.h"
+                :fill="seg.color" rx="2" opacity="0.85" class="bar-rect">
+                <title>{{ seg.label }}</title>
+              </rect>
+            </g>
           </svg>
         </div>
         <div class="chart-labels">
@@ -116,7 +117,7 @@
 
     <!-- ========== Step 2: 逐项调整 ========== -->
     <template v-if="step === 2">
-      <!-- 缩小版折线图 -->
+      <!-- 缩小版折线图 (保持单色简化) -->
       <section class="chart-card chart-mini" @click="step = 1" style="cursor:pointer">
         <h3>📊 预览 <span class="hint">（点击返回调整节奏）</span></h3>
         <svg :width="200" :height="60" class="chart-svg">
@@ -131,39 +132,39 @@
         <div class="adjust-card" v-for="hw in adjustHomework" :key="hw.id">
           <div class="adjust-header">
             <span class="adjust-subject">{{ subjectIcon(hw.subject) }} {{ hw.subject }} · {{ hw.taskType }}</span>
-            <span class="adjust-amount">{{ fmt(hw.totalAmount) }}{{ hw.unit }} · {{ hw.totalAmount * (hw.timePerUnit || 60) }}分</span>
+            <span class="adjust-amount">{{ fmt(hw.totalAmount) }}{{ hw.unit }} · {{ fmtHours((hw.totalAmount) * (hw.timePerUnit || 60)) }}</span>
           </div>
           <div class="adjust-rows">
             <!-- 起始日滑块 + 输入框 -->
             <div class="adjust-row">
               <label>起始</label>
               <input type="range" :min="planStartTs" :max="tsMaxStart" :step="86400"
-                     v-model.number="hw.editStartTs" @input="syncDateInput(hw, 'start'); onAdjustChange()" />
+                     v-model.number="hw.editStartTs" @input="syncDateInput(hw, 'start'); debouncedPreview()" />
               <input type="date" v-model="hw.editWinStart"
-                     @change="syncDateSlider(hw, 'start'); onAdjustChange()"
+                     @change="syncDateSlider(hw, 'start'); debouncedPreview()"
                      class="date-input" />
             </div>
             <!-- 截止日滑块 + 输入框 -->
             <div class="adjust-row">
               <label>截止</label>
               <input type="range" :min="tsMinEnd" :max="planEndTs" :step="86400"
-                     v-model.number="hw.editEndTs" @input="syncDateInput(hw, 'end'); onAdjustChange()" />
+                     v-model.number="hw.editEndTs" @input="syncDateInput(hw, 'end'); debouncedPreview()" />
               <input type="date" v-model="hw.editWinEnd"
-                     @change="syncDateSlider(hw, 'end'); onAdjustChange()"
+                     @change="syncDateSlider(hw, 'end'); debouncedPreview()"
                      class="date-input" />
             </div>
             <!-- 间隔天数滑块 -->
             <div class="adjust-row">
               <label>间隔</label>
               <input type="range" :min="0" :max="hw.maxInterval" v-model.number="hw.editInterval"
-                     @input="onAdjustChange()" />
+                     @input="debouncedPreview()" />
               <span class="interval-label">每 {{ hw.editInterval + 1 }} 天一次</span>
             </div>
             <!-- 锁定 -->
             <div class="adjust-row">
               <label>锁定</label>
               <label class="toggle">
-                <input type="checkbox" v-model="hw.editLocked" @change="onAdjustChange()" />
+                <input type="checkbox" v-model="hw.editLocked" @change="debouncedPreview()" />
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -184,7 +185,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { planApi, type PreviewResult, type HomeworkAdjustItem, type PlanDetail } from '../api'
+import { planApi, scheduleApi, type HomeworkAdjustItem, type PlanDetail, type ScheduleData } from '../api'
+import {
+  allocatePlan,
+  buildAvailableDates,
+  getSubjectColor,
+  type HomeworkInput as SchedHomework,
+  type BarSegment,
+} from '../scheduler'
 
 const route = useRoute()
 const router = useRouter()
@@ -192,14 +200,15 @@ const planId = computed(() => Number(route.params.id))
 
 const step = ref(1)
 const stepTitle = computed(() =>
-  step.value === 1 ? '分配策略' :
-  '分配策略 · 逐项调整'
+  step.value === 1 ? '分配策略' : '分配策略 · 逐项调整'
 )
 
 // ======== Plan info ========
 const planDetail = ref<PlanDetail | null>(null)
 const planStartTs = ref(0)
 const planEndTs = ref(0)
+const scheduleData = ref<ScheduleData | null>(null)
+
 const planDates = computed(() => {
   if (!planDetail.value) return []
   const dates: string[] = []
@@ -210,8 +219,8 @@ const planDates = computed(() => {
   }
   return dates
 })
-const planMinDate = computed(() => planDates.value[0] || '')
-const planMaxDate = computed(() => planDates.value[planDates.value.length - 1] || '')
+const planStartDate = computed(() => planDates.value[0] || '')
+const planEndDate = computed(() => planDates.value[planDates.value.length - 1] || '')
 
 // ======== Step 1: 拖拽排序 ========
 interface SortHomeworkItem {
@@ -221,8 +230,8 @@ interface SortHomeworkItem {
   totalAmount: number
   unit: string
   timePerUnit: number | null
-  rangeStr: string | null  // allocatedRange display
-  autoInterval: number      // recommended interval
+  rangeStr: string | null
+  autoInterval: number
 }
 
 const sortedHomework = ref<SortHomeworkItem[]>([])
@@ -238,56 +247,27 @@ function onDragOver(i: number) {
   dragOverIndex.value = i
 }
 
-async function onDragEnd() {
+function onDragEnd() {
   if (dragIndex.value !== dragOverIndex.value && dragOverIndex.value >= 0) {
     const item = sortedHomework.value.splice(dragIndex.value, 1)[0]
     sortedHomework.value.splice(dragOverIndex.value, 0, item)
-    // Save priority to backend
-    await savePriority()
-    // Debounced refresh ranges
-    debouncedRefreshRanges()
+    localCompute()
   }
   dragIndex.value = -1
   dragOverIndex.value = -1
-}
-
-async function savePriority() {
-  const order = sortedHomework.value.map(hw => hw.id)
-  await planApi.saveHomeworkPriority(planId.value, order)
 }
 
 // ======== Step 1: target end date ========
 const targetEndIdx = ref(0)
 const targetEndDateActual = computed(() => {
   const idx = targetEndIdx.value
-  return idx >= 0 && idx < planDates.value.length ? planDates.value[idx] : planMaxDate.value
+  return idx >= 0 && idx < planDates.value.length ? planDates.value[idx] : planEndDate.value
 })
 
-// ======== Step 1: ranges refresh ========
-let rangesTimer = 0
-function debouncedRefreshRanges() {
-  clearTimeout(rangesTimer)
-  rangesTimer = window.setTimeout(fetchRanges, 1000)
-}
-
-async function fetchRanges() {
-  const res = await planApi.getHomeworkRanges(planId.value, rhythm.value, maxDailyMinutes.value)
-  if (!res.ok) return
-  const rangeMap: Record<number, { range: string; subject: string; taskType: string }> = {}
-  for (const r of res.data.ranges) {
-    rangeMap[r.homeworkId] = r
-  }
-  // Also calculate auto-interval for each homework
-  for (const hw of sortedHomework.value) {
-    const match = rangeMap[hw.id]
-    hw.rangeStr = match ? match.range : null
-  }
-}
-
-// ======== Step 2: Chart (same as v2 with targetEndLine) ========
+// ======== Chart ========
 const rhythm = ref(0)
 const maxDailyMinutes = ref(300)
-const preview = ref<PreviewResult | null>(null)
+const preview = ref<AllocateResult | null>(null)
 const chartW = 280
 const chartH = 140
 
@@ -298,6 +278,21 @@ const presets = [
   { val: 1, label: '偏松' },
   { val: 2, label: '前松后紧' },
 ]
+
+// Use a synchronous-compatible type for preview
+interface AllocateResult {
+  daily: AllocateDay[]
+  allocatedRanges: Array<{ homeworkId: number; range: string }>
+  targetEndDate: string
+  warnings: string[]
+  stats: { availableDays: number; maxDailyMinutes: number; rhythm: number }
+}
+interface AllocateDay {
+  date: string
+  totalMinutes: number
+  overLimit: boolean
+  tasks: Array<{ homeworkId: number; subject: string; taskType: string; amount: number; unit: string; estimatedMinutes: number }>
+}
 
 const dates = computed(() => preview.value?.daily.map(d => d.date.slice(5)) ?? [])
 const maxMin = computed(() => Math.max(...preview.value?.daily.map(d => d.totalMinutes) ?? [1], maxDailyMinutes.value))
@@ -311,7 +306,6 @@ const capLines = computed(() => {
 const targetEndLineX = computed(() => {
   const ds = dates.value
   if (!preview.value?.targetEndDate || ds.length === 0) return -1
-  // Find the chart x position for targetEndDate (using bar positions)
   const targetDateShort = preview.value.targetEndDate.slice(5)
   const idx = ds.indexOf(targetDateShort)
   if (idx < 0) return -1
@@ -319,39 +313,80 @@ const targetEndLineX = computed(() => {
   return idx * (barW + 1) + barW / 2
 })
 
-const stagedBars = ref<Array<{x:number;y:number;w:number;h:number;over:boolean;label:string}>>([])
+// Stagger animation for stacked segments
+const stagedSegments = ref<BarSegment[][]>([])
 let firstLoad = true
-function updateStagedBars() {
-  const target = bars.value
+
+function updateStagedSegments() {
+  const target = barSegments.value
   if (firstLoad && target.length > 0) {
-    stagedBars.value = target.map(b => ({ ...b, y: chartH, h: 0 }))
+    stagedSegments.value = target.map(daySegs =>
+      daySegs.map(s => ({ ...s, y: chartH, h: 0 }))
+    )
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        stagedBars.value = [...target]
+        stagedSegments.value = target.map(d => d.map(s => ({ ...s })))
         firstLoad = false
       })
     })
   } else {
-    stagedBars.value = [...target]
+    stagedSegments.value = target.map(d => d.map(s => ({ ...s })))
   }
 }
 
-const bars = computed(() => {
-  if (!preview.value) return []
+// Stacked bar segments
+const barSegments = computed(() => {
+  if (!preview.value) return [] as BarSegment[][]
+  const barW = Math.max(2, chartW / preview.value.daily.length - 1)
+  const useStacked = barW >= 4  // 柱宽 ≥ 4px 时堆叠
+
   return preview.value.daily.map((d, i) => {
-    const barW = Math.max(2, chartW / preview.value!.daily.length - 1)
-    const h = (d.totalMinutes / maxMin.value) * chartH
-    return {
-      x: i * (barW + 1),
-      y: chartH - h,
-      w: barW,
-      h,
-      over: d.overLimit,
-      label: `${d.date}: ${d.totalMinutes}min ${d.tasks.map(t => `${t.subject} ${t.amount}${t.unit}`).join(', ')}`,
+    const x = i * (barW + 1)
+    const segs: BarSegment[] = []
+    let accumulatedY = chartH  // 从底部堆叠
+
+    if (!useStacked) {
+      // 降级为单色柱
+      const h = (d.totalMinutes / maxMin.value) * chartH
+      segs.push({
+        subject: '',
+        color: d.overLimit ? '#ef4444' : '#4F46E5',
+        y: chartH - h,
+        h,
+        amount: d.totalMinutes,
+        label: `${d.date}: ${d.totalMinutes}min ${d.tasks.map(t => `${t.subject} ${t.amount}${t.unit}`).join(', ')}`,
+        x, w: barW,
+      })
+      return segs
     }
+
+    // 按科目分组并排序
+    const grouped: Record<string, { totalMin: number; tasks: typeof d.tasks }> = {}
+    for (const t of d.tasks) {
+      if (!grouped[t.subject]) grouped[t.subject] = { totalMin: 0, tasks: [] }
+      grouped[t.subject].totalMin += t.estimatedMinutes
+    }
+    const sorted = Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0]))
+
+    for (const [subject, { totalMin }] of sorted) {
+      const h = (totalMin / maxMin.value) * chartH
+      accumulatedY -= h
+      segs.push({
+        subject,
+        color: getSubjectColor(subject),
+        y: Math.max(0, accumulatedY),
+        h: Math.max(0, h),
+        amount: totalMin,
+        label: `${d.date} ${subject}: ${totalMin}min`,
+        x, w: barW,
+      })
+    }
+
+    return segs
   })
 })
 
+// Mini chart bars (keep simple single-color)
 const miniBars = computed(() => {
   if (!preview.value) return []
   const mw = 200, mh = 60
@@ -363,28 +398,23 @@ const miniBars = computed(() => {
   })
 })
 
-// ======== Step 3: Adjust ========
+// ======== Step 2: Adjust ========
 interface AdjustItem extends HomeworkAdjustItem {
   editWinStart: string | null
   editWinEnd: string | null
   editLocked: boolean
   editInterval: number
-  editStartTs: number  // for slider
-  editEndTs: number    // for slider
+  editStartTs: number
+  editEndTs: number
   maxInterval: number
 }
 
 const adjustHomework = ref<AdjustItem[]>([])
 const confirming = ref(false)
 
-// Computed sliders constraints
-const tsMaxStart = computed(() => {
-  // max start ts = plan end ts - 86400 (at least 1 day before end)
-  return planEndTs.value - 86400
-})
-const tsMinEnd = computed(() => {
-  return planStartTs.value + 86400
-})
+// Slider constraints
+const tsMaxStart = computed(() => planEndTs.value - 86400)
+const tsMinEnd = computed(() => planStartTs.value + 86400)
 
 // ======== Helpers ========
 function fmtHours(minutes: number): string {
@@ -411,60 +441,78 @@ function formatDate(iso: string): string {
 function dateStrToTs(iso: string): number {
   return new Date(iso + 'T00:00:00').getTime()
 }
-function tsToDateStr(ts: number): string {
-  return new Date(ts).toISOString().slice(0, 10)
-}
-
 function syncDateInput(hw: AdjustItem, field: 'start' | 'end') {
-  if (field === 'start') hw.editWinStart = tsToDateStr(hw.editStartTs)
-  else hw.editWinEnd = tsToDateStr(hw.editEndTs)
+  if (field === 'start') hw.editWinStart = new Date(hw.editStartTs).toISOString().slice(0, 10)
+  else hw.editWinEnd = new Date(hw.editEndTs).toISOString().slice(0, 10)
 }
 function syncDateSlider(hw: AdjustItem, field: 'start' | 'end') {
-  if (field === 'start') {
-    hw.editStartTs = dateStrToTs(hw.editWinStart || planMinDate.value)
-  } else {
-    hw.editEndTs = dateStrToTs(hw.editWinEnd || planMaxDate.value)
-  }
+  if (field === 'start') hw.editStartTs = dateStrToTs(hw.editWinStart || planStartDate.value)
+  else hw.editEndTs = dateStrToTs(hw.editWinEnd || planEndDate.value)
 }
 
-// ======== Preview ========
+// ======== Local computation (replaces HTTP preview) ========
 let previewTimer = 0
+
 function debouncedPreview() {
   clearTimeout(previewTimer)
-  previewTimer = window.setTimeout(async () => {
-    await refreshPreview()
-  }, 200)
+  previewTimer = window.setTimeout(localCompute, 200)
 }
 
-async function refreshPreview() {
-  const overrides = buildOverrides()
-  const res = await planApi.preview({
-    planId: planId.value,
-    rhythm: rhythm.value,
-    maxDailyMinutes: maxDailyMinutes.value,
-    targetEndDate: targetEndDateActual.value,
-    homeworkOverrides: overrides.length > 0 ? overrides : undefined,
-  })
-  if (res.ok) {
-    preview.value = res.data
-    updateStagedBars()
-  }
-}
+function localCompute(): AllocateResult | null {
+  if (adjustHomework.value.length === 0) return null
 
-function buildOverrides(): Record<string, unknown>[] {
-  if (adjustHomework.value.length === 0) return []
-  return adjustHomework.value.map(hw => ({
-    homeworkId: hw.id,
-    windowStart: hw.editWinStart || null,
-    windowEnd: hw.editWinEnd || null,
-    intervalDays: hw.editInterval,
-    locked: hw.editLocked,
+  // Build scheduler input
+  const hwList: SchedHomework[] = adjustHomework.value.map(hw => ({
+    id: hw.id,
+    subject: hw.subject,
+    task_type: hw.taskType,
+    total_amount: hw.totalAmount,
+    unit: hw.unit,
+    time_per_unit: hw.timePerUnit || 60,
+    window_start: hw.editWinStart,
+    window_end: hw.editWinEnd,
+    locked: hw.editLocked ? 1 : 0,
+    priority: sortedHomework.value.findIndex(sh => sh.id === hw.id),
+    interval_days: hw.editInterval,
   }))
+
+  // Build available dates (filter by schedule)
+  const dates = buildAvailableDates(planStartDate.value, planEndDate.value, scheduleData.value)
+  if (dates.length === 0) return null
+
+  // Build overrides map (pass empty - adjustments are already in hwList)
+  const overridesMap: Record<number, any> = {}
+
+  const result = allocatePlan(hwList, dates, rhythm.value, maxDailyMinutes.value, targetEndDateActual.value, overridesMap)
+
+  // Update preview for chart
+  preview.value = result
+
+  // Update sortedHomework ranges
+  for (const hw of sortedHomework.value) {
+    const match = result.allocatedRanges.find(r => r.homeworkId === hw.id)
+    hw.rangeStr = match ? match.range : null
+
+    // Calculate autoInterval from result (estimate from scheduled days)
+    const schedHw = hwList.find(h => h.id === hw.id)
+    if (schedHw) {
+      hw.autoInterval = schedHw.interval_days
+    }
+  }
+
+  updateStagedSegments()
+  return result
 }
 
-// ======== Adjust change ========
-async function onAdjustChange() {
-  // Save to backend
+// ======== Confirm generate ========
+async function handleConfirm() {
+  confirming.value = true
+  const order = sortedHomework.value.map(hw => hw.id)
+
+  // 1. Save priority
+  await planApi.saveHomeworkPriority(planId.value, order)
+
+  // 2. Save adjustments
   const adjustments = adjustHomework.value.map(hw => ({
     homeworkId: hw.id,
     windowStart: hw.editWinStart || null,
@@ -473,26 +521,16 @@ async function onAdjustChange() {
     locked: hw.editLocked,
   }))
   await planApi.saveHomeworkAdjust(planId.value, adjustments as any)
-  debouncedPreview()
-}
 
-// ======== Confirm generate ========
-async function handleConfirm() {
-  confirming.value = true
-  const overrides = adjustHomework.value.map(hw => ({
-    homeworkId: hw.id,
-    windowStart: hw.editWinStart || null,
-    windowEnd: hw.editWinEnd || null,
-    intervalDays: hw.editInterval,
-    locked: hw.editLocked,
-  }))
+  // 3. Generate (uses localCompute result to skip HTTP preview)
   const res = await planApi.generate({
     planId: planId.value,
     rhythm: rhythm.value,
     maxDailyMinutes: maxDailyMinutes.value,
     targetEndDate: targetEndDateActual.value,
-    homeworkOverrides: overrides as any,
+    // Don't pass overrides - generate reads from DB which we just saved
   } as any)
+
   confirming.value = false
   if (res.ok) {
     router.push('/plan/' + planId.value)
@@ -508,8 +546,13 @@ function handleBack() {
 
 // ======== Init ========
 onMounted(async () => {
-  // Fetch plan detail
-  const planRes = await planApi.detail(planId.value)
+  // Load all data (3 API calls)
+  const [planRes, adjRes, schedRes] = await Promise.all([
+    planApi.detail(planId.value),
+    planApi.getHomeworkAdjust(planId.value),
+    scheduleApi.list(),
+  ])
+
   if (planRes.ok) {
     planDetail.value = planRes.data
     const s = new Date(planRes.data.start_date)
@@ -519,13 +562,12 @@ onMounted(async () => {
     targetEndIdx.value = planDates.value.length - 1
   }
 
-  // Fetch homework adjust list (v3: contains priority, intervalDays, allocatedRange)
-  const [adjRes] = await Promise.all([
-    planApi.getHomeworkAdjust(planId.value),
-  ])
+  if (schedRes.ok) {
+    scheduleData.value = schedRes.data
+  }
 
   if (adjRes.ok) {
-    // Build sortedHomework from adjust data (sorted by priority already)
+    // Build sortedHomework (sorted by priority)
     sortedHomework.value = adjRes.data.homework.map(h => ({
       id: h.id,
       subject: h.subject,
@@ -534,13 +576,13 @@ onMounted(async () => {
       unit: h.unit,
       timePerUnit: h.timePerUnit,
       rangeStr: h.allocatedRange,
-      autoInterval: 0,
+      autoInterval: h.intervalDays || 0,
     }))
 
-    // Build adjustHomework with editable fields
+    // Build adjustHomework with editable fields + slider values
     adjustHomework.value = adjRes.data.homework.map(h => {
-      const startTs = dateStrToTs(h.windowStart || planMinDate.value)
-      const endTs = dateStrToTs(h.windowEnd || planMaxDate.value)
+      const startTs = dateStrToTs(h.windowStart || planStartDate.value)
+      const endTs = dateStrToTs(h.windowEnd || planEndDate.value)
       const winDays = ((endTs - startTs) / 86400) + 1
       const maxInterval = Math.max(0, Math.floor(winDays / Math.max(1, h.totalAmount)))
       return {
@@ -556,8 +598,8 @@ onMounted(async () => {
     })
   }
 
-  // Fetch ranges for step 1 display
-  await fetchRanges()
+  // Initial local computation
+  localCompute()
 })
 </script>
 
@@ -567,7 +609,7 @@ onMounted(async () => {
 .page-header h2 { font-size: 1.125rem; font-weight: 700; color: var(--color-text); }
 .btn-back { padding: 6px 12px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-card); color: var(--color-text-secondary); font-size: 0.875rem; cursor: pointer; font-family: var(--font-family); }
 
-/* Step 1: combined completion + cap card */
+/* Combined card */
 .combined-card { background: var(--color-card); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 .combined-row { display: flex; align-items: center; gap: 12px; }
 .combined-field { flex: 1; min-width: 0; }
@@ -576,15 +618,16 @@ onMounted(async () => {
 .combined-slider-wrap input[type="range"] { flex: 1; accent-color: var(--color-primary); }
 .combined-val { font-size: 0.8125rem; font-weight: 600; color: var(--color-primary); white-space: nowrap; min-width: 44px; text-align: right; }
 .combined-divider { width: 1px; height: 36px; background: var(--color-border); flex-shrink: 0; }
-.combined-cap .cap-inline-wrap { display: flex; align-items: center; gap: 4px; }
-.cap-input-sm { width: 64px; padding: 4px 6px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); font-size: 0.875rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); text-align: center; }
+.combined-cap { flex: 0 0 auto; text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
+.combined-cap .cap-inline-wrap { display: flex; align-items: center; gap: 6px; }
+.combined-cap .combined-label { text-align: right; }
+.cap-input-sm { width: 60px; padding: 6px 8px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); font-size: 0.875rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); text-align: center; }
 .combined-val-small { font-size: 0.75rem; color: var(--color-text-placeholder); }
 
-/* Step 1: sort list compact */
+/* Sort list */
 .sort-section h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; color: var(--color-text); }
 .sort-section .hint { font-weight: 400; font-size: 0.75rem; color: var(--color-text-placeholder); }
 .sort-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
-.sort-item-compact { padding: 10px 12px; }
 .sort-item {
   display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
   padding: 12px 14px;
@@ -600,18 +643,16 @@ onMounted(async () => {
 .sort-info { flex: 1; min-width: 0; }
 .sort-name { font-weight: 600; font-size: 0.875rem; color: var(--color-text); display: block; }
 .sort-amount { font-size: 0.75rem; color: var(--color-text-placeholder); display: block; margin-top: 2px; }
-.sort-meta {
-  width: 100%; font-size: 0.75rem; color: var(--color-text-placeholder);
-  padding-left: 28px;
-}
+.sort-meta { width: 100%; font-size: 0.75rem; color: var(--color-text-placeholder); padding-left: 28px; }
+.sort-item-compact { padding: 10px 12px; }
 .sort-item-compact .sort-name { font-size: 0.8125rem; }
 .sort-item-compact .sort-amount { font-size: 0.6875rem; }
 .sort-item-compact .sort-meta { font-size: 0.6875rem; }
 .sort-empty { text-align: center; padding: 24px; color: var(--color-text-placeholder); font-size: 0.875rem; }
 
 /* Chart card */
-.chart-card, .slider-card, .cap-card, .stats-card { background: var(--color-card); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-.chart-card h3, .slider-card h3, .cap-card h3, .stats-card h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; color: var(--color-text); }
+.chart-card, .slider-card, .stats-card { background: var(--color-card); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.chart-card h3, .slider-card h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; color: var(--color-text); }
 .chart-wrap { overflow-x: auto; }
 .chart-svg { display: block; }
 .chart-labels { display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--color-text-placeholder); margin-top: 2px; }
@@ -623,10 +664,6 @@ onMounted(async () => {
 .preset-row { display: flex; gap: 6px; }
 .preset-btn { flex: 1; padding: 8px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-card); color: var(--color-text-secondary); font-size: 0.8125rem; cursor: pointer; font-family: var(--font-family); text-align: center; }
 .preset-btn.active { border-color: var(--color-primary); color: var(--color-primary); font-weight: 600; background: rgba(79,70,229,0.04); }
-
-.cap-input-row { display: flex; align-items: center; gap: 8px; }
-.cap-input { width: 100px; padding: 8px 10px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm); font-size: 1rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); text-align: center; }
-.cap-unit { font-size: 0.875rem; color: var(--color-text-secondary); }
 
 .stat-row { display: flex; gap: 6px; font-size: 0.8125rem; color: var(--color-text-secondary); align-items: center; }
 .warn { color: var(--color-error); font-weight: 500; }
@@ -650,7 +687,6 @@ onMounted(async () => {
 .adjust-row label { font-size: 0.75rem; color: var(--color-text-placeholder); min-width: 40px; }
 .adjust-row input[type="range"] { flex: 1; accent-color: var(--color-primary); min-width: 0; }
 .date-input { width: 110px; padding: 6px 8px; border: 1.5px solid var(--color-border); border-radius: 6px; font-size: 0.8125rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); flex-shrink: 0; }
-
 .interval-label { font-size: 0.75rem; color: var(--color-text-secondary); white-space: nowrap; min-width: 80px; }
 
 .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
