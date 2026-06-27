@@ -38,6 +38,12 @@
           <span>{{ dates[Math.floor(dates.length / 2)] || '' }}</span>
           <span>{{ dates[dates.length - 1] || '' }}</span>
         </div>
+        <div class="chart-legend" v-if="subjectsInChart.length > 0">
+          <span v-for="s in subjectsInChart" :key="s" class="legend-item">
+            <span class="legend-dot" :style="{ background: getSubjectColor(s) }"></span>
+            {{ s }}
+          </span>
+        </div>
       </section>
 
       <!-- 预计完成日期 + 每日上限 同栏 -->
@@ -103,7 +109,7 @@
             </div>
             <div class="sort-meta">
               {{ hw.rangeStr ? '📅 ' + dateRangeShort(hw.rangeStr) : '⏳ 拖拽后预览…' }}
-              <span v-if="hw.autoInterval > 0"> · 隔{{ hw.autoInterval + 1 }}天一次</span>
+              <span v-if="hw.autoInterval > 0"> · 每{{ hw.autoInterval + 1 }}天一次</span><span v-else> · 每天</span>
             </div>
           </div>
           <div v-if="sortedHomework.length === 0" class="sort-empty">暂无作业数据</div>
@@ -135,34 +141,25 @@
             <span class="adjust-amount">{{ fmt(hw.totalAmount) }}{{ hw.unit }} · {{ fmtHours((hw.totalAmount) * (hw.timePerUnit || 60)) }}</span>
           </div>
           <div class="adjust-rows">
-            <!-- 起始日滑块 + 输入框 -->
-            <div class="adjust-row">
-              <label>起始</label>
-              <input type="range" :min="planStartTs" :max="tsMaxStart" :step="86400"
-                     v-model.number="hw.editStartTs" @input="syncDateInput(hw, 'start'); debouncedPreview()" />
+            <!-- 起止日期同一行 -->
+            <div class="adjust-row adjust-row-dates">
+              <span class="date-label">起</span>
               <input type="date" v-model="hw.editWinStart"
-                     @change="syncDateSlider(hw, 'start'); debouncedPreview()"
-                     class="date-input" />
-            </div>
-            <!-- 截止日滑块 + 输入框 -->
-            <div class="adjust-row">
-              <label>截止</label>
-              <input type="range" :min="tsMinEnd" :max="planEndTs" :step="86400"
-                     v-model.number="hw.editEndTs" @input="syncDateInput(hw, 'end'); debouncedPreview()" />
+                     @change="debouncedPreview()"
+                     class="date-input-sm" />
+              <span class="date-label">止</span>
               <input type="date" v-model="hw.editWinEnd"
-                     @change="syncDateSlider(hw, 'end'); debouncedPreview()"
-                     class="date-input" />
+                     @change="debouncedPreview()"
+                     class="date-input-sm" />
             </div>
-            <!-- 间隔天数滑块 -->
+            <!-- 间隔 + 锁定 同一行 -->
             <div class="adjust-row">
-              <label>间隔</label>
-              <input type="range" :min="0" :max="hw.maxInterval" v-model.number="hw.editInterval"
-                     @input="debouncedPreview()" />
-              <span class="interval-label">每 {{ hw.editInterval + 1 }} 天一次</span>
-            </div>
-            <!-- 锁定 -->
-            <div class="adjust-row">
-              <label>锁定</label>
+              <span class="interval-label">每</span>
+              <input type="number" v-model.number="hw.editInterval" min="1" :max="hw.maxInterval"
+                     @input="debouncedPreview()"
+                     class="interval-input" />
+              <span class="interval-label">天一次</span>
+              <span class="adj-label" style="margin-left:auto">锁定</span>
               <label class="toggle">
                 <input type="checkbox" v-model="hw.editLocked" @change="debouncedPreview()" />
                 <span class="toggle-slider"></span>
@@ -338,27 +335,10 @@ function updateStagedSegments() {
 const barSegments = computed(() => {
   if (!preview.value) return [] as BarSegment[][]
   const barW = Math.max(2, chartW / preview.value.daily.length - 1)
-  const useStacked = barW >= 4  // 柱宽 ≥ 4px 时堆叠
-
   return preview.value.daily.map((d, i) => {
     const x = i * (barW + 1)
     const segs: BarSegment[] = []
     let accumulatedY = chartH  // 从底部堆叠
-
-    if (!useStacked) {
-      // 降级为单色柱
-      const h = (d.totalMinutes / maxMin.value) * chartH
-      segs.push({
-        subject: '',
-        color: d.overLimit ? '#ef4444' : '#4F46E5',
-        y: chartH - h,
-        h,
-        amount: d.totalMinutes,
-        label: `${d.date}: ${d.totalMinutes}min ${d.tasks.map(t => `${t.subject} ${t.amount}${t.unit}`).join(', ')}`,
-        x, w: barW,
-      })
-      return segs
-    }
 
     // 按科目分组并排序
     const grouped: Record<string, { totalMin: number; tasks: typeof d.tasks }> = {}
@@ -386,6 +366,18 @@ const barSegments = computed(() => {
   })
 })
 
+// Legend: unique subjects in chart
+const subjectsInChart = computed(() => {
+  if (!preview.value) return []
+  const set = new Set<string>()
+  for (const d of preview.value.daily) {
+    for (const t of d.tasks) {
+      set.add(t.subject)
+    }
+  }
+  return Array.from(set)
+})
+
 // Mini chart bars (keep simple single-color)
 const miniBars = computed(() => {
   if (!preview.value) return []
@@ -404,17 +396,11 @@ interface AdjustItem extends HomeworkAdjustItem {
   editWinEnd: string | null
   editLocked: boolean
   editInterval: number
-  editStartTs: number
-  editEndTs: number
   maxInterval: number
 }
 
 const adjustHomework = ref<AdjustItem[]>([])
 const confirming = ref(false)
-
-// Slider constraints
-const tsMaxStart = computed(() => planEndTs.value - 86400)
-const tsMinEnd = computed(() => planStartTs.value + 86400)
 
 // ======== Helpers ========
 function fmtHours(minutes: number): string {
@@ -441,15 +427,6 @@ function formatDate(iso: string): string {
 function dateStrToTs(iso: string): number {
   return new Date(iso + 'T00:00:00').getTime()
 }
-function syncDateInput(hw: AdjustItem, field: 'start' | 'end') {
-  if (field === 'start') hw.editWinStart = new Date(hw.editStartTs).toISOString().slice(0, 10)
-  else hw.editWinEnd = new Date(hw.editEndTs).toISOString().slice(0, 10)
-}
-function syncDateSlider(hw: AdjustItem, field: 'start' | 'end') {
-  if (field === 'start') hw.editStartTs = dateStrToTs(hw.editWinStart || planStartDate.value)
-  else hw.editEndTs = dateStrToTs(hw.editWinEnd || planEndDate.value)
-}
-
 // ======== Local computation (replaces HTTP preview) ========
 let previewTimer = 0
 
@@ -473,7 +450,7 @@ function localCompute(): AllocateResult | null {
     window_end: hw.editWinEnd,
     locked: hw.editLocked ? 1 : 0,
     priority: sortedHomework.value.findIndex(sh => sh.id === hw.id),
-    interval_days: hw.editInterval,
+    interval_days: hw.editInterval - 1,
   }))
 
   // Build available dates (filter by schedule)
@@ -517,7 +494,7 @@ async function handleConfirm() {
     homeworkId: hw.id,
     windowStart: hw.editWinStart || null,
     windowEnd: hw.editWinEnd || null,
-    intervalDays: hw.editInterval,
+    intervalDays: hw.editInterval - 1,
     locked: hw.editLocked,
   }))
   await planApi.saveHomeworkAdjust(planId.value, adjustments as any)
@@ -581,8 +558,10 @@ onMounted(async () => {
 
     // Build adjustHomework with editable fields + slider values
     adjustHomework.value = adjRes.data.homework.map(h => {
-      const startTs = dateStrToTs(h.windowStart || planStartDate.value)
-      const endTs = dateStrToTs(h.windowEnd || planEndDate.value)
+      const startStr = h.windowStart || planStartDate.value
+      const endStr = h.windowEnd || planEndDate.value
+      const startTs = dateStrToTs(startStr)
+      const endTs = dateStrToTs(endStr)
       const winDays = ((endTs - startTs) / 86400) + 1
       const maxInterval = Math.max(0, Math.floor(winDays / Math.max(1, h.totalAmount)))
       return {
@@ -590,9 +569,7 @@ onMounted(async () => {
         editWinStart: h.windowStart,
         editWinEnd: h.windowEnd,
         editLocked: h.locked,
-        editInterval: h.intervalDays,
-        editStartTs: startTs,
-        editEndTs: endTs,
+        editInterval: h.intervalDays + 1,
         maxInterval: Math.max(1, Math.min(maxInterval, Math.floor(winDays / 2))),
       }
     })
@@ -617,7 +594,7 @@ onMounted(async () => {
 .combined-slider-wrap { display: flex; align-items: center; gap: 6px; }
 .combined-slider-wrap input[type="range"] { flex: 1; accent-color: var(--color-primary); }
 .combined-val { font-size: 0.8125rem; font-weight: 600; color: var(--color-primary); white-space: nowrap; min-width: 44px; text-align: right; }
-.combined-divider { width: 1px; height: 36px; background: var(--color-border); flex-shrink: 0; }
+.combined-divider { width: 1px; height: 42px; background: var(--color-border); flex-shrink: 0; margin: 0 4px; }
 .combined-cap { flex: 0 0 auto; text-align: right; display: flex; flex-direction: column; align-items: flex-end; }
 .combined-cap .cap-inline-wrap { display: flex; align-items: center; gap: 6px; }
 .combined-cap .combined-label { text-align: right; }
@@ -656,6 +633,9 @@ onMounted(async () => {
 .chart-wrap { overflow-x: auto; }
 .chart-svg { display: block; }
 .chart-labels { display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--color-text-placeholder); margin-top: 2px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.6875rem; color: var(--color-text-placeholder); }
+.legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 
 .slider-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .slider-label { font-size: 0.8125rem; color: var(--color-text-secondary); white-space: nowrap; min-width: 60px; }
@@ -686,8 +666,13 @@ onMounted(async () => {
 .adjust-row { display: flex; align-items: center; gap: 8px; }
 .adjust-row label { font-size: 0.75rem; color: var(--color-text-placeholder); min-width: 40px; }
 .adjust-row input[type="range"] { flex: 1; accent-color: var(--color-primary); min-width: 0; }
-.date-input { width: 110px; padding: 6px 8px; border: 1.5px solid var(--color-border); border-radius: 6px; font-size: 0.8125rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); flex-shrink: 0; }
-.interval-label { font-size: 0.75rem; color: var(--color-text-secondary); white-space: nowrap; min-width: 80px; }
+.date-input-sm { flex: 1; min-width: 0; padding: 6px 8px; border: 1.5px solid var(--color-border); border-radius: 6px; font-size: 0.8125rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); }
+.date-label { font-size: 0.8125rem; color: var(--color-text); font-weight: 600; white-space: nowrap; }
+.adjust-row-dates { gap: 4px; }
+.adjust-row-dates .date-input-sm { flex: 1; min-width: 0; }
+.adj-label { font-size: 0.75rem; color: var(--color-text-placeholder); min-width: 40px; }
+.interval-input { width: 56px; padding: 6px 8px; border: 1.5px solid var(--color-border); border-radius: 6px; font-size: 0.875rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text); text-align: center; }
+.interval-label { font-size: 0.75rem; color: var(--color-text-secondary); white-space: nowrap; }
 
 .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
 .toggle input { opacity: 0; width: 0; height: 0; }
