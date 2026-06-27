@@ -363,6 +363,8 @@ export interface PreviewDay {
 
 export interface PreviewResult {
   daily: PreviewDay[]
+  allocatedRanges: { homeworkId: number; range: string }[]
+  targetEndDate?: string
   warnings: string[]
   stats: { availableDays: number; maxDailyMinutes: number; rhythm: number }
 }
@@ -377,6 +379,9 @@ export interface HomeworkAdjustItem {
   windowStart: string | null
   windowEnd: string | null
   locked: boolean
+  priority: number
+  intervalDays: number
+  allocatedRange: string | null
 }
 
 export const planApi = {
@@ -433,7 +438,7 @@ export const planApi = {
   },
 
   /** 预览分配 */
-  preview(input: { planId: number; rhythm: number; maxDailyMinutes: number; homeworkOverrides?: Record<string, unknown>[] }) {
+  preview(input: { planId: number; rhythm: number; maxDailyMinutes: number; targetEndDate?: string | null; homeworkOverrides?: Record<string, unknown>[] }) {
     return request<PreviewResult>('POST', '/plans/preview.php', input as unknown as Record<string, unknown>)
   },
 
@@ -443,8 +448,18 @@ export const planApi = {
   },
 
   /** 保存逐项调整 */
-  saveHomeworkAdjust(planId: number, adjustments: { homeworkId: number; windowStart?: string | null; windowEnd?: string | null; locked?: boolean }[]) {
+  saveHomeworkAdjust(planId: number, adjustments: { homeworkId: number; windowStart?: string | null; windowEnd?: string | null; intervalDays?: number; locked?: boolean }[]) {
     return request<{ updated: number }>('PUT', `/plans/homework-adjust.php?planId=${planId}`, { adjustments } as unknown as Record<string, unknown>)
+  },
+
+  /** 保存优先级排序 */
+  saveHomeworkPriority(planId: number, order: number[]) {
+    return request<{ updated: number }>('PUT', `/plans/homework-priority.php?planId=${planId}`, { order } as unknown as Record<string, unknown>)
+  },
+
+  /** 获取作业预估时间范围 */
+  getHomeworkRanges(planId: number, rhythm: number, maxDailyMinutes: number) {
+    return request<{ ranges: { homeworkId: number; subject: string; taskType: string; range: string }[] }>('POST', `/plans/homework-ranges.php?planId=${planId}`, { rhythm, maxDailyMinutes } as unknown as Record<string, unknown>)
   },
 
   /** 单日任务列表 */

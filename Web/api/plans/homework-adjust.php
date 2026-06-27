@@ -1,9 +1,9 @@
 <?php
 /**
- * BitHabit - 逐项作业调整
+ * BitHabit - 逐项作业调整 (v3)
  *
- * GET  /api/plans/homework-adjust.php?planId=X  → 返回作业调整列表
- * PUT  /api/plans/homework-adjust.php?planId=X  → 保存调整
+ * GET  /api/plans/homework-adjust.php?planId=X  → 返回作业调整列表 (含 v3 字段)
+ * PUT  /api/plans/homework-adjust.php?planId=X  → 保存调整 (含 intervalDays)
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -33,11 +33,12 @@ if ($planCheck->get_result()->num_rows === 0) {
     exit;
 }
 
-// --- GET: 返回作业调整列表 ---
+// --- GET: 返回作业调整列表 (v3 含 priority/intervalDays/allocatedRange) ---
 if ($method === 'GET') {
     $stmt = $conn->prepare(
-        'SELECT id, subject, task_type, total_amount, unit, time_per_unit, window_start, window_end, locked
-         FROM homework WHERE plan_id = ? AND user_id = ? ORDER BY subject'
+        'SELECT id, subject, task_type, total_amount, unit, time_per_unit,
+                window_start, window_end, locked, priority, interval_days, allocated_range
+         FROM homework WHERE plan_id = ? AND user_id = ? ORDER BY priority ASC'
     );
     $stmt->bind_param('ii', $planId, $userId);
     $stmt->execute();
@@ -55,6 +56,9 @@ if ($method === 'GET') {
             'windowStart' => $row['window_start'],
             'windowEnd' => $row['window_end'],
             'locked' => (bool)(int)$row['locked'],
+            'priority' => (int)$row['priority'],
+            'intervalDays' => (int)$row['interval_days'],
+            'allocatedRange' => $row['allocated_range'],
         ];
     }
 
@@ -62,7 +66,7 @@ if ($method === 'GET') {
     exit;
 }
 
-// --- PUT: 保存逐项调整 ---
+// --- PUT: 保存逐项调整 (v3 含 intervalDays) ---
 if ($method === 'PUT') {
     $input = json_decode(file_get_contents('php://input'), true);
     $adjustments = $input['adjustments'] ?? [];
@@ -74,7 +78,7 @@ if ($method === 'PUT') {
 
     $updated = 0;
     $updateStmt = $conn->prepare(
-        'UPDATE homework SET window_start = ?, window_end = ?, locked = ? WHERE id = ? AND plan_id = ? AND user_id = ?'
+        'UPDATE homework SET window_start = ?, window_end = ?, interval_days = ?, locked = ? WHERE id = ? AND plan_id = ? AND user_id = ?'
     );
 
     foreach ($adjustments as $adj) {
@@ -83,9 +87,10 @@ if ($method === 'PUT') {
 
         $ws = $adj['windowStart'] ?? null;
         $we = $adj['windowEnd'] ?? null;
+        $intervalDays = isset($adj['intervalDays']) ? (int)$adj['intervalDays'] : 0;
         $locked = isset($adj['locked']) ? (int)(bool)$adj['locked'] : 0;
 
-        $updateStmt->bind_param('ssiiii', $ws, $we, $locked, $hwId, $planId, $userId);
+        $updateStmt->bind_param('ssiiiii', $ws, $we, $intervalDays, $locked, $hwId, $planId, $userId);
         if ($updateStmt->execute() && $updateStmt->affected_rows > 0) {
             $updated++;
         }

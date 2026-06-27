@@ -474,25 +474,26 @@ Response:
 
 ---
 
-## 模块三：分配策略 & 生成 API（v2）
+## 模块三：分配策略 & 生成 API（v3）
 
-> 2026-06-27：重构分配流程——两步式（总体策略 → 逐项调整 → 确认生成）
+> 2026-06-27：v3 重构——三步式（优先级排序 → 节奏约束 → 逐项调整），新增优先级/间隔/集中分配
 
 ### 数据库变更（需 Coder 执行）
 
-`homework` 表新增字段：
 ```sql
 ALTER TABLE homework ADD COLUMN plan_id INT NOT NULL AFTER user_id;
 ALTER TABLE homework ADD INDEX idx_plan (plan_id);
 ALTER TABLE homework ADD COLUMN window_start DATE DEFAULT NULL AFTER time_per_unit;
 ALTER TABLE homework ADD COLUMN window_end DATE DEFAULT NULL AFTER window_start;
 ALTER TABLE homework ADD COLUMN locked TINYINT(1) DEFAULT 0 AFTER window_end;
+ALTER TABLE homework ADD COLUMN priority INT DEFAULT 0 AFTER locked;           -- v3: 优先级（越小越优先）
+ALTER TABLE homework ADD COLUMN interval_days INT DEFAULT 0 AFTER priority;   -- v3: 间隔天数（0=每天）
+ALTER TABLE homework ADD COLUMN allocated_range VARCHAR(50) DEFAULT NULL AFTER interval_days;  -- v3: 预估时间快照
 ```
 
-- `plan_id`：作业归属到计划（v2 核心变更）
-- `window_start`：该项作业最早开始日期，NULL=计划起始日
-- `window_end`：该项作业最晚完成日期，NULL=计划结束日
-- `locked`：1=锁定不参与重新分配
+- `priority`：用户拖拽排序的优先级（0 最高，1 次之……）
+- `interval_days`：间隔天数，0=每天分配，1=隔天，2=隔两天……
+- `allocated_range`：生成时写入的预估日期范围（如 "2026-07-10 ~ 2026-07-20"），只读展示
 
 ### 3.1 预览分配（实时折线图数据）
 
@@ -503,13 +504,15 @@ Authorization: Bearer <token>
 Request:
 {
   "planId": 1,
-  "rhythm": 0,              // 节奏偏好：-2=极左  -1=偏左  0=均匀  1=偏右  2=极右
-  "maxDailyMinutes": 300,   // 每日上限（分钟）
-  "homeworkOverrides": [    // 逐项调整（可选，未传则所有作业默认全时段）
+  "rhythm": 0,              // -2=极左  -1=偏左  0=均匀  1=偏右  2=极右
+  "maxDailyMinutes": 300,
+  "targetEndDate": null,    // v3 新增：null=不调整，传日期=压缩/拉伸到该日完成
+  "homeworkOverrides": [    // 逐项调整（Step 2/3 传入）
     {
       "homeworkId": 5,
-      "windowStart": "2026-07-10",  // 起始日，null=计划起始日
-      "windowEnd": "2026-08-15",    // 截止日，null=计划结束日
+      "windowStart": "2026-07-10",
+      "windowEnd": "2026-08-15",
+      "intervalDays": 1,    // v3 新增
       "locked": false
     }
   ]
@@ -521,7 +524,7 @@ Response (200):
     {
       "date": "2026-07-01",
       "totalMinutes": 240,
-      "overLimit": false,       // 是否超出每日上限
+      "overLimit": false,
       "tasks": [
         {
           "homeworkId": 1,
@@ -535,13 +538,18 @@ Response (200):
     },
     ...
   ],
-  "warnings": []                // ["7/15 超出每日上限 60 分钟", ...]
+  "allocatedRanges": [       // v3 新增：每项作业的预估日期范围
+    { "homeworkId": 1, "range": "2026-07-01 ~ 2026-07-25" },
+    { "homeworkId": 5, "range": "2026-08-10 ~ 2026-08-25" }
+  ],
+  "warnings": []
 }
 ```
 
 - 纯预览，不写入数据库
-- 前端根据返回数据渲染折线图
-- homeworkOverrides 可选，未传则假设无约束
+- **v3 新增 `allocatedRanges`** 字段，返回每项作业被分配的最早和最晚日期
+- homeworkOverrides 可选，包含 `intervalDays` 字段
+- 使用 v3 多阶段算法：优先级排序 → 间隔过滤 → 集中检测 → 节奏权重 → 顺序分配 → 溢出
 
 ### 3.2 确认生成（写入 plan_tasks）
 
@@ -554,6 +562,7 @@ Request:
   "planId": 1,
   "rhythm": 0,
   "maxDailyMinutes": 300,
+  "targetEndDate": null,    // v3 新增
   "homeworkOverrides": [...]
 }
 
@@ -561,15 +570,19 @@ Response (201):
 {
   "planId": 1,
   "createdTasks": 180,
+  "targetEndDate": "2026-08-20",  // v3 新增：实际最后有作业的日期
+  "allocatedRanges": [       // v3 新增
+    { "homeworkId": 1, "range": "2026-07-01 ~ 2026-07-25" }
+  ],
   "warnings": []
 }
 ```
 
-- 与 preview 参数完全一致，但写入数据库
-- 生成前删除该计划下所有未锁定/未完成的 plan_tasks
-- 锁定的 task 保留不动
+- 与 preview 参数一致，写入 DB
+- 生成前删除非锁定/未完成的 plan_tasks
+- **生成后写回 allocated_range 到 homework 表**，供 Step 1 排序列表展示
 
-### 3.3 获取作业逐项调整列表
+### 3.3 获取作业逐项调整列表（v3 扩展）
 
 ```
 GET /api/plans/:planId/homework-adjust
@@ -585,18 +598,18 @@ Response (200):
       "totalAmount": 5,
       "unit": "篇",
       "timePerUnit": 60,
-      "windowStart": null,     // null=计划起始日
-      "windowEnd": null,       // null=计划结束日
-      "locked": false
+      "windowStart": null,
+      "windowEnd": null,
+      "locked": false,
+      "priority": 3,          // v3 新增
+      "intervalDays": 0,       // v3 新增
+      "allocatedRange": null   // v3 新增（上次生成的快照）
     }
   ]
 }
 ```
 
-- 返回计划下所有作业及其当前约束状态
-- 用于逐项调整页渲染
-
-### 3.4 保存逐项调整（不生成）
+### 3.4 保存逐项调整（v3 扩展）
 
 ```
 PUT /api/plans/:planId/homework-adjust
@@ -605,7 +618,13 @@ Authorization: Bearer <token>
 Request:
 {
   "adjustments": [
-    { "homeworkId": 5, "windowStart": "2026-08-01", "windowEnd": null, "locked": true }
+    {
+      "homeworkId": 5,
+      "windowStart": "2026-08-01",
+      "windowEnd": null,
+      "intervalDays": 2,     // v3 新增
+      "locked": true
+    }
   ]
 }
 
@@ -613,8 +632,49 @@ Response (200):
 { "updated": 1 }
 ```
 
-- 仅保存约束到 homework 表，不触发生成
-- 在「逐项调整」页每次调整后调用 + 再次调用 preview 刷新折线图
+### 3.5 保存优先级排序（v3 新增）
+
+```
+PUT /api/plans/:planId/homework-priority
+Authorization: Bearer <token>
+
+Request:
+{
+  "order": [5, 3, 1, 4, 2]   // homeworkId 数组，按新顺序排列
+}
+
+Response (200):
+{ "updated": 5 }             // 更新数量
+```
+
+- 接收完整排序数组，批量更新 priority 字段
+- priority = 数组索引（0 最高优先级）
+- Step 1 拖拽排序后调用
+
+### 3.6 获取作业预览时间范围（v3 新增）
+
+```
+POST /api/plans/:planId/homework-ranges
+Authorization: Bearer <token>
+
+Request:
+{
+  "rhythm": 0,
+  "maxDailyMinutes": 300
+  // 不需要传 overrides，直接用当前 homework 表的 priority/interval/window 值
+}
+
+Response (200):
+{
+  "ranges": [
+    { "homeworkId": 1, "subject": "物理", "taskType": "模拟卷", "range": "2026-07-01 ~ 2026-07-25" },
+    { "homeworkId": 5, "subject": "语文", "taskType": "作文", "range": "2026-08-15 ~ 2026-08-25" }
+  ]
+}
+```
+
+- 轻量预览，仅返回每项作业的预估日期范围（不含每日明细）
+- Step 1 排序列表使用，拖拽后刷新预估时间
 
 ---
 

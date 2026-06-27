@@ -1,11 +1,11 @@
 <?php
 /**
- * BitHabit - 预览分配 (v3)
+ * BitHabit - 获取作业预估时间范围 (v3)
  *
- * POST /api/plans/preview.php
- * 
- * 多阶段分配预览，不写入数据库。
- * 返回每日明细 + allocatedRanges + targetEndDate
+ * POST /api/plans/homework-ranges.php?planId=X
+ *
+ * 轻量预览，仅返回每项作业的预估日期范围 + 自动推荐间隔。
+ * 不返回每日明细。
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -23,14 +23,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$input = json_decode(file_get_contents('php://input'), true);
 $conn = getDbConnection();
 
-$planId = (int)($input['planId'] ?? 0);
+$planId = (int)($_GET['planId'] ?? 0);
+$input = json_decode(file_get_contents('php://input'), true);
 $rhythm = max(-2, min(2, (int)($input['rhythm'] ?? 0)));
 $maxDailyMinutes = (int)($input['maxDailyMinutes'] ?? 300);
-$targetEndDate = $input['targetEndDate'] ?? null;
-$homeworkOverrides = $input['homeworkOverrides'] ?? [];
 
 if ($planId <= 0) {
     http_response_code(400);
@@ -54,7 +52,7 @@ $endDate = $plan['end_date'];
 $startTs = strtotime($startDate);
 $endTs = strtotime($endDate);
 
-// 获取日程约束
+// 日程过滤
 $weeklySchedule = [];
 $ws = $conn->prepare('SELECT day_of_week, start_time, end_time FROM schedule_weekly WHERE user_id = ?');
 $ws->bind_param('i', $userId);
@@ -69,45 +67,31 @@ $ss->execute();
 $ssr = $ss->get_result();
 while ($r = $ssr->fetch_assoc()) { $specialSchedule[] = $r; }
 
-// 生成可用日期列表
 $dates = [];
 for ($d = $startTs; $d <= $endTs; $d += 86400) {
     $dateStr = date('Y-m-d', $d);
     $dow = (int)date('w', $d);
-    $isFullDayBlocked = false;
-
+    $blocked = false;
     foreach ($weeklySchedule as $wsItem) {
-        if ($wsItem['day_of_week'] === $dow && $wsItem['start_time'] === null && $wsItem['end_time'] === null) {
-            $isFullDayBlocked = true; break;
-        }
+        if ($wsItem['day_of_week'] === $dow && $wsItem['start_time'] === null && $wsItem['end_time'] === null) { $blocked = true; break; }
     }
-    if ($isFullDayBlocked) continue;
-
+    if ($blocked) continue;
     foreach ($specialSchedule as $ssItem) {
         if ($dateStr >= $ssItem['date_from'] && $dateStr <= ($ssItem['date_to'] ?? $ssItem['date_from'])) {
-            if ($ssItem['start_time'] === null && $ssItem['end_time'] === null) {
-                $isFullDayBlocked = true; break;
-            }
+            if ($ssItem['start_time'] === null && $ssItem['end_time'] === null) { $blocked = true; break; }
         }
     }
-    if ($isFullDayBlocked) continue;
-
+    if ($blocked) continue;
     $dates[] = ['date' => $dateStr, 'idx' => count($dates)];
 }
 
 $N = count($dates);
 if ($N === 0) {
-    echo json_encode([
-        'daily' => [],
-        'allocatedRanges' => [],
-        'targetEndDate' => $startDate,
-        'warnings' => ['可用天数为 0'],
-        'stats' => ['availableDays' => 0, 'maxDailyMinutes' => $maxDailyMinutes, 'rhythm' => $rhythm],
-    ]);
+    echo json_encode(['ranges' => []]);
     exit;
 }
 
-// 获取作业列表 (v3 含 priority/interval_days)
+// 获取作业 (直接用数据库值，不用 overrides)
 $hwStmt = $conn->prepare(
     'SELECT id, subject, task_type, total_amount, unit, time_per_unit,
             window_start, window_end, locked, priority, interval_days
@@ -117,14 +101,27 @@ $hwStmt->bind_param('ii', $planId, $userId);
 $hwStmt->execute();
 $homeworkRows = $hwStmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// 构建 overridesMap
-$overridesMap = [];
-foreach ($homeworkOverrides as $ov) {
-    $hid = (int)($ov['homeworkId'] ?? 0);
-    if ($hid > 0) $overridesMap[$hid] = $ov;
+// 调用完整分配算法但不传 overrides（使用数据库当前值）
+$allocResult = allocatePlan($homeworkRows, $dates, $rhythm, $maxDailyMinutes, null, []);
+
+// 整理返回：只返回 ranges
+$hwMap = [];
+foreach ($homeworkRows as $row) {
+    $hwMap[(int)$row['id']] = $row;
 }
 
-// 调用公共分配算法
-$result = allocatePlan($homeworkRows, $dates, $rhythm, $maxDailyMinutes, $targetEndDate, $overridesMap);
+$ranges = [];
+foreach ($allocResult['allocatedRanges'] as $ar) {
+    $hwId = $ar['homeworkId'];
+    if (isset($hwMap[$hwId])) {
+        $hw = $hwMap[$hwId];
+        $ranges[] = [
+            'homeworkId' => $hwId,
+            'subject' => $hw['subject'],
+            'taskType' => $hw['task_type'],
+            'range' => $ar['range'],
+        ];
+    }
+}
 
-echo json_encode($result, JSON_UNESCAPED_UNICODE);
+echo json_encode(['ranges' => $ranges], JSON_UNESCAPED_UNICODE);
