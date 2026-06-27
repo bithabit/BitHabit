@@ -124,7 +124,7 @@ if ($method === 'POST') {
         'INSERT INTO homework (user_id, plan_id, subject, task_type, total_amount, unit, time_per_unit, notes) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $stmt->bind_param('iissdiss', $userId, $planId, $subject, $taskType, $totalAmount, $unit, $timePerUnit, $notes);
+    $stmt->bind_param('iissdsis', $userId, $planId, $subject, $taskType, $totalAmount, $unit, $timePerUnit, $notes);
 
     if ($stmt->execute()) {
         http_response_code(201);

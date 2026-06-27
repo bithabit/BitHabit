@@ -112,7 +112,7 @@
           </div>
           <div class="form-group"><label>耗时/单位（分钟）</label><input type="number" v-model.number="addForm.timePerUnit" min="1" placeholder="默认 60" /></div>
           <div class="form-actions">
-            <button class="btn-primary" @click="handleAddHw" :disabled="!addValid">添加</button>
+            <button class="btn-primary" @click="handleAddHw" :disabled="!addValid || submittingHw">添加</button>
           </div>
         </div>
       </section>
@@ -163,6 +163,7 @@ const overallPct = computed(() => totalTasks.value > 0 ? Math.round((totalComple
 // Menu & edit
 const showMenu = ref<number | null>(null)
 const editingId = ref<number | null>(null)
+const submittingHw = ref(false)
 const regenerating = ref(false)
 
 // Add form
@@ -224,8 +225,10 @@ async function handleDelete(id: number) {
 }
 
 async function handleAddHw() {
-  if (!addValid.value || !addForm.value.totalAmount) return
-  await homeworkApi.create({ planId: planId.value, subject: addForm.value.subject, type: addForm.value.taskType, totalAmount: addForm.value.totalAmount, unit: addForm.value.unit, timePerUnit: addForm.value.timePerUnit || 60, notes: addForm.value.notes })
+  if (!addValid.value || !addForm.value.totalAmount || submittingHw.value) return
+  submittingHw.value = true
+  await homeworkApi.create({ planId: planId.value, subject: addForm.value.subject, type: addForm.value.taskType, totalAmount: addForm.value.totalAmount ?? 1, unit: addForm.value.unit, timePerUnit: addForm.value.timePerUnit || 60, notes: addForm.value.notes })
+  submittingHw.value = false
   addForm.value = { subject: '', taskType: '有效作业', totalAmount: 1, unit: '张', timePerUnit: null, notes: '' }
   showAddForm.value = false
   loadAll()

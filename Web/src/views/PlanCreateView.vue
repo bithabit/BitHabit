@@ -66,8 +66,8 @@
           <input type="text" v-model="form.notes" maxlength="200" placeholder="如：五年高考三年模拟" />
         </div>
         <div class="form-actions">
-          <button class="btn-outline btn-press" @click="handleAddAndContinue" :disabled="!formValid">继续添加</button>
-          <button class="btn-primary btn-press" @click="handleAddAndClose" :disabled="!formValid">确定</button>
+          <button class="btn-outline btn-press" @click="handleAddAndContinue" :disabled="!formValid || submitting">继续添加</button>
+          <button class="btn-primary btn-press" @click="handleAddAndClose" :disabled="!formValid || submitting">确定</button>
         </div>
       </section>
 
@@ -148,6 +148,7 @@ const step1Valid = computed(() => startDate.value && endDate.value)
 const form = ref({ subject: '', taskType: '有效作业', totalAmount: 1 as number | null, unit: '张', timePerUnit: null as number | null, notes: '' })
 const formValid = computed(() => form.value.subject && form.value.taskType.trim() && form.value.totalAmount && form.value.totalAmount > 0 && form.value.unit.trim())
 const homeworkItems = ref<HomeworkItem[]>([])
+const submitting = ref(false)
 const generating = ref(false)
 const errorMsg = ref('')
 const result = ref<PlanGenerateResult | null>(null)
@@ -213,30 +214,34 @@ async function addHomework(input: { subject: string; type: string; totalAmount: 
 }
 
 async function handleAddAndContinue() {
-  if (!form.value.totalAmount) return
+  if (!formValid.value || submitting.value) return
+  submitting.value = true
   const ok = await addHomework({
     subject: form.value.subject,
     type: form.value.taskType,
-    totalAmount: form.value.totalAmount,
+    totalAmount: form.value.totalAmount ?? 1,
     unit: form.value.unit,
     timePerUnit: form.value.timePerUnit || 60,
     notes: form.value.notes,
   })
+  submitting.value = false
   if (ok) {
     form.value = { subject: '', taskType: '有效作业', totalAmount: 1, unit: '张', timePerUnit: null, notes: '' }
   }
 }
 
 async function handleAddAndClose() {
-  if (!form.value.totalAmount) return
+  if (!formValid.value || submitting.value) return
+  submitting.value = true
   await addHomework({
     subject: form.value.subject,
     type: form.value.taskType,
-    totalAmount: form.value.totalAmount,
+    totalAmount: form.value.totalAmount ?? 1,
     unit: form.value.unit,
     timePerUnit: form.value.timePerUnit || 60,
     notes: form.value.notes,
   })
+  submitting.value = false
 }
 
 async function removeHomework(id: number) {
@@ -273,7 +278,8 @@ async function handleAiParse() {
 }
 
 async function handleAiConfirm() {
-  aiConfirming.value = true; let allOk = true
+  if (aiConfirming.value || submitting.value) return
+  aiConfirming.value = true; submitting.value = true; let allOk = true
   for (const task of aiTasks.value) {
     const ok = await addHomework({
       subject: task.subject, type: task.type, totalAmount: task.totalAmount,
@@ -281,7 +287,7 @@ async function handleAiConfirm() {
     })
     if (!ok) allOk = false
   }
-  aiConfirming.value = false
+  aiConfirming.value = false; submitting.value = false
   if (allOk) { aiTasks.value = []; aiText.value = ''; aiError.value = '' }
 }
 </script>
@@ -302,13 +308,14 @@ async function handleAiConfirm() {
 .form-group { display: flex; flex-direction: column; margin-bottom: 10px; }
 .form-group label { font-size: 0.8125rem; color: var(--color-text-secondary); margin-bottom: 4px; }
 .form-group input, .form-group select {
+  width: 100%; box-sizing: border-box;
   padding: 10px 12px; border: 1.5px solid var(--color-border); border-radius: var(--radius-sm);
   font-size: 0.9375rem; font-family: var(--font-family); background: var(--color-input-bg); color: var(--color-text);
 }
 .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--color-border-focus); }
 .form-row { display: flex; gap: 10px; }
-.half { flex: 1; }
-.flex-1 { flex: 1; }
+.half { flex: 1; min-width: 0; }
+.flex-1 { flex: 1; min-width: 0; }
 .form-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 .btn-primary {
