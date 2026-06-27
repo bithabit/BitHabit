@@ -1,4 +1,5 @@
 <?php
+
 /**
  * BitHabit - 生成暑假作业计划 (v2)
  *
@@ -11,6 +12,10 @@
  */
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate');
+
+// 丢弃任何在 header 之前产生的输出
+while (ob_get_level()) ob_end_clean();
 
 require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/../jwt.php';
@@ -242,14 +247,31 @@ try {
     }
 
     $conn->commit();
+
+    // 计算总作业时间（安全包裹，不中断 JSON 输出）
+    $totalWorkMinutes = 0;
+    try {
+        foreach ($dates as $di => $day) {
+            foreach ($allocation[$di] as $hwIdx => $units) {
+                if ($units <= 0) continue;
+                $totalWorkMinutes += $units * $homework[$hwIdx]['time_per_unit'];
+            }
+        }
+    } catch (\Throwable $ignored) {}
+
     echo json_encode([
         'planId' => $planId,
         'name' => $planName,
+        'startDate' => $startDate,
+        'endDate' => $endDate,
+        'totalWorkMinutes' => $totalWorkMinutes,
+        'availableDays' => $N,
+        'totalAvailableMinutes' => $totalAvailableMinutes,
         'createdTasks' => $createdTasks,
         'warnings' => $warnings,
     ], JSON_UNESCAPED_UNICODE);
 
-} catch (Exception $e) {
+} catch (\Throwable $e) {
     $conn->rollback();
     http_response_code(500);
     echo json_encode(['error' => '生成失败: ' . $e->getMessage(), 'code' => 'DB_ERROR']);

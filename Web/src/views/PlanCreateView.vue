@@ -250,21 +250,26 @@ async function removeHomework(id: number) {
 }
 
 async function handleGenerate() {
-  generating.value = true
-  errorMsg.value = ''
-  result.value = null
+  try {
+    generating.value = true
+    errorMsg.value = ''
+    result.value = null
 
-  const res = await planApi.generate({
-    planId: createdPlanId.value,
-    startDate: startDate.value,
-    endDate: endDate.value,
-  })
+    const res = await planApi.generate({
+      planId: createdPlanId.value,
+      startDate: startDate.value,
+      endDate: endDate.value,
+    })
 
-  generating.value = false
-  if (res.ok) {
-    result.value = res.data
-  } else {
-    errorMsg.value = res.error || '生成失败'
+    generating.value = false
+    if (res.ok) {
+      result.value = res.data
+    } else {
+      errorMsg.value = res.error || '生成失败'
+    }
+  } catch (e: unknown) {
+    generating.value = false
+    errorMsg.value = '应用异常: ' + (e instanceof Error ? e.message : String(e))
   }
 }
 

@@ -1,346 +1,102 @@
-# BitHabit - 任务清单
+# TASKS.md — Coder 任务清单
 
-> 最后更新：2026-06-27  
-> 执行者：Coder Agent  
-> 来源：Designer Agent  
-> 目标 commit：334a068
-
-## ⚠️ 执行规则
-
-**Coder 完成任务后必须通过飞书通道直接通知用户验收，不要通过 sessions_send 通知 Designer。**
+> 创建：2026-06-27 · Designer → Coder · BitHabit 项目
 
 ---
 
-## 📋 重构概述
+## TASK-010：折线图动画增强
 
-**目标**：将数据模型从「作业游离，被计划引用」改为「作业隶属于计划」。
+**概述**：在 PlanAllocateView 的柱状图 SVG 上增加动画效果，提升交互体验。
 
-**影响范围**：DB schema + 全部 API + 全部前端页面。几乎全量重构。
+**文件**：`Web/src/views/PlanAllocateView.vue`
 
-**策略**：分 3 个 Phase 执行，每个 Phase 独立可部署。
+### 改动点
 
----
+#### 1. CSS 动画 Token 复用
+项目 `style.css` 已有：
+```css
+--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+--ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+```
+`PlanAllocateView.vue` 直接引用即可。
 
-## Phase 1: DB Schema + 后端 API 改造
+#### 2. `<template>` 修改
+给 SVG 中的 `<rect>` 增加 `class="bar-rect"`：
 
-### TASK-101: homework 表增加 plan_id 字段
+```html
+<!-- 原 -->
+<rect v-for="(bar, i) in bars" :key="i"
+  :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h"
+  :fill="bar.over ? '#ef4444' : '#4F46E5'" rx="2" opacity="0.8">
 
-**文件**：数据库 + `Web/api/homework.php`
-
-**DB 变更**：
-```sql
-ALTER TABLE homework ADD COLUMN plan_id INT NOT NULL DEFAULT 0 AFTER user_id;
-ALTER TABLE homework ADD INDEX idx_plan (plan_id);
+<!-- 改 -->
+<rect v-for="(bar, i) in stagedBars" :key="i"
+  :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h"
+  :fill="bar.over ? '#ef4444' : '#4F46E5'" rx="2" opacity="0.8"
+  class="bar-rect">
 ```
 
-**旧数据迁移**：
-- 将现有 homework 的 `plan_id` 设为第一个 plan 的 id（从 plan_tasks 反向查找）
-- 如果找不到对应 plan，归入 plan_id=0（逻辑上属于被删除的遗留计划，前端可过滤掉）
+> 注意：数据源从 `bars` 改为 `stagedBars`，见第 3 点。
 
-**homework.php API 变更**：
-- GET：增加 `?plan_id=X` 参数（必填），只返回该计划的作业
-- POST：增加 `plan_id` 必填字段
-- PATCH/DELETE：保持不变（已有权限校验）
+#### 3. `<style scoped>` 新增
 
-### TASK-102: 计划列表 API 扩展
-
-**文件**：`Web/api/plans/list.php`
-
-- 返回每个计划的基本信息 + 作业数量 + 进度
-- 增加状态字段：`active` / `completed` / `expired`
-- 活跃计划排前面，已完成/过期沉底
-
-**返回格式**：
-```json
-{
-  "plans": [
-    {
-      "id": 1,
-      "name": "暑假作业计划",
-      "start_date": "2026-07-01",
-      "end_date": "2026-08-31",
-      "homework_count": 8,
-      "total_tasks": 240,
-      "completed_tasks": 45,
-      "status": "active",
-      "created_at": "2026-06-27T10:00:00Z"
-    }
-  ]
+```css
+rect.bar-rect {
+  transition: y 0.4s var(--ease-spring),
+              height 0.4s var(--ease-spring),
+              fill 0.3s var(--ease-smooth);
 }
 ```
 
-### TASK-103: 今日任务 API 扩展 — 多计划合并
+#### 4. `<script>` 入场 Stagger 逻辑
 
-**文件**：`Web/api/today.php`
+新增 `stagedBars` ref，实现首帧柱高为 0 → 下一帧弹起：
 
-- 查询所有 `status='active'` 的计划
-- 对每个活跃计划，查询当前日期的 `plan_tasks`
-- 按计划分组返回
+```ts
+const stagedBars = ref<typeof bars.value>([])
+let firstLoad = true
 
-**返回格式**：
-```json
-{
-  "date": "2026-07-15",
-  "plans": [
-    {
-      "plan_id": 1,
-      "plan_name": "暑假作业计划",
-      "tasks": [...]
-    },
-    {
-      "plan_id": 2,
-      "plan_name": "数学补习班",
-      "tasks": [...]
-    }
-  ]
+// 在 refreshPreview() 完成后：
+// 首次加载 → stagedBars 先设空（柱高全 0），再 requestAnimationFrame 赋真值
+// 后续更新 → 直接赋值
+const updateStagedBars = () => {
+  const target = bars.value
+  if (firstLoad && target.length > 0) {
+    stagedBars.value = target.map(b => ({ ...b, y: chartH, h: 0 }))
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        stagedBars.value = [...target]
+        firstLoad = false
+      })
+    })
+  } else {
+    stagedBars.value = [...target]
+  }
 }
 ```
 
-### TASK-104: 计划 CRUD API 补齐
+在 `refreshPreview()` 的 API 返回后调用 `updateStagedBars()`。
 
-**文件**：`Web/api/plans/create.php` / `update.php` / `delete.php` / `archive.php`
+#### 5. miniBars 同样加 transition（可选）
 
-- `POST /api/plans/create.php`：创建计划（name + start_date + end_date + daily_hours）
-- `PATCH /api/plans/update.php?id=X`：编辑计划基本信息
-- `DELETE /api/plans/delete.php?id=X`：删除计划（级联删除 homework + plan_tasks）
-- `PATCH /api/plans/archive.php?id=X`：归档计划（不再出现在今日页）
+Step 2 的缩小版折线图同理，给 rect 加 `class="bar-rect"` 即可获得值过渡动画（无需 stagger）。
 
-### TASK-105: generate.php 适配新模型
+### 验收标准
 
-**文件**：`Web/api/plans/generate.php`
+- [ ] 页面首次进入 → 柱子从左到右逐个弹出（弹簧感）
+- [ ] 拖动节奏滑块 → 柱子平滑迁移到新位置，无跳跃
+- [ ] 修改每日上限 → 虚线移动 + 柱子同步调整
+- [ ] 超限柱子从蓝变红有渐变过渡
+- [ ] 切换预设按钮 → 柱子平滑过渡
+- [ ] Step 2 缩小版折线图同步有过渡动画
+- [ ] 无控制台错误、无布局跳动
 
-- 入参增加 `plan_id`（必填）
-- 查询 `homework WHERE plan_id = ?` 获取该计划的作业池
-- 其余逻辑不变（整数分配）
+### 备注
 
----
-
-## Phase 2: 前端页面重构
-
-### TASK-201: 底部导航改为两栏
-
-**文件**：`Web/src/App.vue`
-
-- 去掉「作业」导航项
-- 保留「今日 | 计划」两栏
-- 日历通过计划详情页进入
-
-### TASK-202: 计划列表页改造
-
-**文件**：`Web/src/views/PlansListView.vue`
-
-**新布局**：
-```
-┌──────────────────────────┐
-│ 📋 我的计划      [+ 新建] │
-├──────────────────────────┤
-│ 🔵 活跃                   │
-│ ┌──────────────────────┐ │
-│ │ 📘 暑假作业计划       │ │
-│ │ 7/1 - 8/31 · 8 项作业 │ │
-│ │ ████████░░ 45/240    │ │
-│ │ [查看] [归档]         │ │
-│ └──────────────────────┘ │
-│ ┌──────────────────────┐ │
-│ │ 📙 数学补习班         │ │
-│ │ 7/5 - 7/18 · 3 项作业│ │
-│ │ ████░░░░░░ 12/45     │ │
-│ │ [查看] [归档]         │ │
-│ └──────────────────────┘ │
-│                          │
-│ 📦 已完成/已过期           │
-│ ┌──────────────────────┐ │
-│ │ 📕 期末复习计划       │ │
-│ │ 1/8 - 1/15 · 已完成  │ │
-│ │ [查看]                │ │
-│ └──────────────────────┘ │
-└──────────────────────────┘
-```
-
-- 点击计划卡片 → 进入计划详情页
-- 点击「新建」→ 计划创建页
-- 点击「归档」→ 调 archive API
-
-### TASK-203: 计划创建页改造 — 融入作业录入
-
-**文件**：`Web/src/views/PlanCreateView.vue`
-
-**新流程**（单页三步）：
-
-```
-Step 1: 基本信息
-  ┌──────────────────────────┐
-  │ 创建新计划                │
-  │ 名称：[暑假作业计划____]  │
-  │ 起止：[7/1] → [8/31]     │
-  │ 每日可用：[8:00] → [22:00]│
-  │ 分配策略：○ 平均分配      │
-  │         [下一步：录入作业] │
-  └──────────────────────────┘
-
-Step 2: 录入作业
-  ┌──────────────────────────┐
-  │ 暑假作业计划 · 作业录入   │
-  │                          │
-  │ [手动录入表单区域]        │
-  │ 或 [AI 自然语言录入]     │
-  │                          │
-  │ 已录入 3 条：            │
-  │ · 数学 模拟卷 10 套      │
-  │ · 英语 阅读理解 20 篇    │
-  │ · 语文 读后感 2 篇       │
-  │                          │
-  │ [+ 继续添加] [生成计划]  │
-  └──────────────────────────┘
-
-Step 3: 生成结果 → 跳转计划详情/日历
-```
-
-- 创建计划后不立即生成，先录入作业
-- 作业录入完点「生成计划」→ 调 generate API
-- 生成后跳转到计划详情页
-
-### TASK-204: 计划详情页
-
-**文件**：新建 `Web/src/views/PlanDetailView.vue`
-
-**布局**：
-```
-┌──────────────────────────┐
-│ ← 暑假作业计划            │
-├──────────────────────────┤
-│ 7/1 - 8/31 · 8 项作业    │
-│ ████████░░ 45/240 (19%) │
-├──────────────────────────┤
-│ 📚 作业列表              │
-│ ┌──────────────────────┐ │
-│ │ 📐 数学 | 模拟卷      │ │
-│ │ 10 套 · 90 分/套  [⋯]│ │
-│ │ ██████░░░░ 3/10 30%  │ │
-│ └──────────────────────┘ │
-│ ┌──────────────────────┐ │
-│ │ 🇬🇧 英语 | 阅读理解    │ │
-│ │ 20 篇 · 15 分/篇 [⋯]│ │
-│ │ ████░░░░░░ 8/20 40%  │ │
-│ └──────────────────────┘ │
-│                          │
-│ [+ 添加作业]              │
-├──────────────────────────┤
-│ 📅 [查看日历] [重新生成]  │
-└──────────────────────────┘
-```
-
-**功能**：
-- 作业列表 + 进度条（从 HomeworkView 迁移过来）
-- ⋯ 菜单：编辑 / 删除（不再有「添加到计划」「重新计划」）
-- 「添加作业」按钮 → 行内弹出录入表单
-- 「查看日历」→ 跳转 CalendarView（传 plan_id）
-- 「重新生成」→ 调 generate API 重新分配（覆盖现有 plan_tasks）
-- 作业进度 = `SUM(plan_tasks.amount WHERE homework_id=X AND completed=1) / total_amount`
-
-### TASK-205: 今日任务页适配多计划
-
-**文件**：`Web/src/views/TodayView.vue`
-
-- 按计划分组显示任务
-- 每个计划一个折叠区
-- 打卡逻辑不变（按 task 打卡）
-- 底部统计所有计划合计项数和耗时
-
-### TASK-206: 日历视图适配
-
-**文件**：`Web/src/views/CalendarView.vue`
-
-- 日弹窗内按计划分组显示任务
-- 不同计划的任务用不同颜色/标签区分
-- 拖拽和移动逻辑不变（TASK-005 规格仍适用）
-
-### TASK-207: 移除独立的 HomeworkView
-
-**文件**：删除或重定向 `Web/src/views/HomeworkView.vue`
-
-- 作业列表改为在计划详情页内展示
-- 路由 `/homework` 可重定向到 `/plans` 或移除
+- 动画实现完全用 CSS transition，不需要 JS requestAnimationFrame（除入场的单次 stagger）
+- CSS transition 属性浏览器原生支持 SVG rect 的 x/y/width/height/fill
+- 改动量小，约 30 行新增代码
 
 ---
 
-## Phase 3: 拖拽调整（TASK-005 内容）
-
-Phase 2 稳定后执行 TASK-005 的全部 11 个子任务（规格不变，适配新模型即可）。
-
----
-
-## 执行顺序
-
-```
-Phase 1（后端）：
-  101 → 102 → 103 → 104 → 105
-  （可部分并行：101+104 同时做，102+103 同时做）
-
-Phase 2（前端）：
-  201（导航）→ 202（计划列表）→ 203（创建页）→ 204（详情页）→ 205（今日页）→ 206（日历）→ 207（清理）
-
-Phase 3（拖拽）：
-  等 206 稳定后，执行原 TASK-005
-```
-
----
-
-## 影响范围总览
-
-| 层级 | 新增 | 修改 | 删除 |
-|------|------|------|------|
-| DB | homework.plan_id 列 | — | — |
-| API | plans/create/update/delete/archive | homework.php, today.php, plans/list.php, generate.php | — |
-| 前端页面 | PlanDetailView | PlansListView, PlanCreateView, TodayView, CalendarView, App.vue | HomeworkView（合并到 PlanDetail） |
-| 路由 | /plan/:id | /plan-create, /plans, /today, /calendar | /homework |
-
----
-
-## 测试要点
-
-- [ ] 创建计划 → 录入作业 → 生成 → 每日任务正确
-- [ ] 两个活跃计划的今日任务合并显示，按计划分组
-- [ ] 归档计划后今日页不再出现该计划任务
-- [ ] 旧数据迁移后作业归属正确
-- [ ] 删除计划 → 级联删除该计划的所有作业和任务
-- [ ] 计划详情页的作业进度条正确
-- [ ] 日历视图区分不同计划的任务
-
----
-
-## TASK-007: 计划列表 UI 微调
-
-**优先级**：P1
-**状态**：⏳ 待实现
-**创建**：2026-06-27
-
-### 需求
-
-1. **计划列表页**：已归档/已过期的计划卡片下，在「查看」按钮旁边增加「删除」按钮
-2. **新建计划**：去掉「每日开始时间」「每日结束时间」两个输入项
-
-### 子任务
-
-#### S1：PlansListView — 归档区增加删除按钮
-
-**文件**：`Web/src/views/PlansListView.vue`
-
-- 在已完成/过期计划卡片的操作区，增加「删除」按钮（已有「查看」）
-- 点击删除 → `confirm('确定删除？此操作不可撤销。')` → 调 `DELETE /api/plans/delete.php` → 从列表移除
-- 删除按钮样式区别于「查看」按钮，用二级/危险色
-
-#### S2：PlanCreateView — 去掉每日时段输入
-
-**文件**：`Web/src/views/PlanCreateView.vue`
-
-- 删除 Step 1 中的「每日开始时间」「每日结束时间」两个输入字段
-- `generate.php` 的 `dailyStartMinutes` / `dailyEndMinutes` 使用默认值（如 8:00-22:00）
-- 不影响 generate.php 内部逻辑（它已有默认值兜底）
-
-### 测试要点
-
-- [ ] 归档区计划显示「查看」+「删除」两个按钮
-- [ ] 点击删除 → 确认框 → 删除成功 → 列表刷新
-- [ ] 新建计划时不再要求填每日时段
-- [ ] 生成计划仍正常工作（使用默认 8:00-22:00）
+> 完成 TASK-010 后直接回复用户告知结果，无需经过 Designer 转发。

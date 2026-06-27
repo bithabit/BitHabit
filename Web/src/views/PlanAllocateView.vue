@@ -17,10 +17,10 @@
               :x1="0" :y1="y" :x2="chartW" :y2="y"
               stroke="#ef4444" stroke-dasharray="4,3" stroke-width="1" opacity="0.5"/>
             <!-- 柱子 -->
-            <rect v-for="(bar, i) in bars" :key="i"
+            <rect v-for="(bar, i) in stagedBars" :key="i"
               :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h"
               :fill="bar.over ? '#ef4444' : '#4F46E5'" rx="2"
-              opacity="0.8">
+              opacity="0.8" class="bar-rect">
               <title>{{ bar.label }}</title>
             </rect>
           </svg>
@@ -77,7 +77,7 @@
         <svg :width="200" :height="60" class="chart-svg">
           <rect v-for="(bar, i) in miniBars" :key="i"
             :x="bar.x" :y="bar.y" :width="bar.w" :height="bar.h"
-            :fill="bar.over ? '#ef4444' : '#4F46E5'" rx="1" opacity="0.7"/>
+            :fill="bar.over ? '#ef4444' : '#4F46E5'" rx="1" opacity="0.7" class="bar-rect"/>
         </svg>
       </section>
 
@@ -153,6 +153,23 @@ const capLines = computed(() => {
   return [Math.max(0, Math.min(chartH, capY))]
 })
 
+const stagedBars = ref<Array<{x:number;y:number;w:number;h:number;over:boolean;label:string}>>([])
+let firstLoad = true
+function updateStagedBars() {
+  const target = bars.value
+  if (firstLoad && target.length > 0) {
+    stagedBars.value = target.map(b => ({ ...b, y: chartH, h: 0 }))
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        stagedBars.value = [...target]
+        firstLoad = false
+      })
+    })
+  } else {
+    stagedBars.value = [...target]
+  }
+}
+
 const bars = computed(() => {
   if (!preview.value) return []
   return preview.value.daily.map((d, i) => {
@@ -201,7 +218,7 @@ function refreshPreview() {
       locked: hw.editLocked,
     }))
     const res = await planApi.preview({ planId: planId.value, rhythm: rhythm.value, maxDailyMinutes: maxDailyMinutes.value, homeworkOverrides: overrides.length > 0 ? overrides : undefined })
-    if (res.ok) preview.value = res.data
+    if (res.ok) { preview.value = res.data; updateStagedBars() }
   }, 200)
 }
 
@@ -311,4 +328,10 @@ h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; color: var(--co
 .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
 
 .action-row { display: flex; gap: 8px; margin-top: 8px; }
+
+rect.bar-rect {
+  transition: y 0.4s var(--ease-spring),
+              height 0.4s var(--ease-spring),
+              fill 0.3s var(--ease-smooth);
+}
 </style>

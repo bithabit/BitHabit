@@ -39,23 +39,38 @@ async function request<T = unknown>(
 
     clearTimeout(timeoutId)
 
-    const data = await response.json()
+    // Read as text first so we can show raw output on parse failure
+    const rawText = await response.text()
+
+    let data: T
+    try {
+      data = JSON.parse(rawText) as T
+    } catch (parseErr) {
+      return {
+        ok: false,
+        data: null as unknown as T,
+        error: '服务器返回的内容不是JSON: ' + rawText.slice(0, 500),
+      }
+    }
 
     if (!response.ok) {
       return {
         ok: false,
         data: null as unknown as T,
-        error: data.error || '请求失败',
+        error: (data as Record<string,unknown>).error as string || '请求失败',
       }
     }
 
     return { ok: true, data: data as T }
   } catch (err: unknown) {
     clearTimeout(timeoutId)
-    if (err instanceof Error && err.name === 'AbortError') {
-      return { ok: false, data: null as unknown as T, error: '网络好像不太好，再试试？' }
+    if (err instanceof Error) {
+      if (err.name === 'AbortError') {
+        return { ok: false, data: null as unknown as T, error: '请求超时（' + (timeoutMs / 1000) + '秒），再试试？' }
+      }
+      return { ok: false, data: null as unknown as T, error: '网络错误: ' + err.message }
     }
-    return { ok: false, data: null as unknown as T, error: '网络好像不太好，再试试？' }
+    return { ok: false, data: null as unknown as T, error: '未知错误' }
   }
 }
 

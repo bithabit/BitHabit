@@ -474,6 +474,150 @@ Response:
 
 ---
 
+## 模块三：分配策略 & 生成 API（v2）
+
+> 2026-06-27：重构分配流程——两步式（总体策略 → 逐项调整 → 确认生成）
+
+### 数据库变更（需 Coder 执行）
+
+`homework` 表新增字段：
+```sql
+ALTER TABLE homework ADD COLUMN plan_id INT NOT NULL AFTER user_id;
+ALTER TABLE homework ADD INDEX idx_plan (plan_id);
+ALTER TABLE homework ADD COLUMN window_start DATE DEFAULT NULL AFTER time_per_unit;
+ALTER TABLE homework ADD COLUMN window_end DATE DEFAULT NULL AFTER window_start;
+ALTER TABLE homework ADD COLUMN locked TINYINT(1) DEFAULT 0 AFTER window_end;
+```
+
+- `plan_id`：作业归属到计划（v2 核心变更）
+- `window_start`：该项作业最早开始日期，NULL=计划起始日
+- `window_end`：该项作业最晚完成日期，NULL=计划结束日
+- `locked`：1=锁定不参与重新分配
+
+### 3.1 预览分配（实时折线图数据）
+
+```
+POST /api/plans/preview
+Authorization: Bearer <token>
+
+Request:
+{
+  "planId": 1,
+  "rhythm": 0,              // 节奏偏好：-2=极左  -1=偏左  0=均匀  1=偏右  2=极右
+  "maxDailyMinutes": 300,   // 每日上限（分钟）
+  "homeworkOverrides": [    // 逐项调整（可选，未传则所有作业默认全时段）
+    {
+      "homeworkId": 5,
+      "windowStart": "2026-07-10",  // 起始日，null=计划起始日
+      "windowEnd": "2026-08-15",    // 截止日，null=计划结束日
+      "locked": false
+    }
+  ]
+}
+
+Response (200):
+{
+  "daily": [
+    {
+      "date": "2026-07-01",
+      "totalMinutes": 240,
+      "overLimit": false,       // 是否超出每日上限
+      "tasks": [
+        {
+          "homeworkId": 1,
+          "subject": "数学",
+          "taskType": "模拟卷",
+          "amount": 1,
+          "unit": "套",
+          "estimatedMinutes": 90
+        }
+      ]
+    },
+    ...
+  ],
+  "warnings": []                // ["7/15 超出每日上限 60 分钟", ...]
+}
+```
+
+- 纯预览，不写入数据库
+- 前端根据返回数据渲染折线图
+- homeworkOverrides 可选，未传则假设无约束
+
+### 3.2 确认生成（写入 plan_tasks）
+
+```
+POST /api/plans/generate
+Authorization: Bearer <token>
+
+Request:
+{
+  "planId": 1,
+  "rhythm": 0,
+  "maxDailyMinutes": 300,
+  "homeworkOverrides": [...]
+}
+
+Response (201):
+{
+  "planId": 1,
+  "createdTasks": 180,
+  "warnings": []
+}
+```
+
+- 与 preview 参数完全一致，但写入数据库
+- 生成前删除该计划下所有未锁定/未完成的 plan_tasks
+- 锁定的 task 保留不动
+
+### 3.3 获取作业逐项调整列表
+
+```
+GET /api/plans/:planId/homework-adjust
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "homework": [
+    {
+      "id": 5,
+      "subject": "语文",
+      "taskType": "作文",
+      "totalAmount": 5,
+      "unit": "篇",
+      "timePerUnit": 60,
+      "windowStart": null,     // null=计划起始日
+      "windowEnd": null,       // null=计划结束日
+      "locked": false
+    }
+  ]
+}
+```
+
+- 返回计划下所有作业及其当前约束状态
+- 用于逐项调整页渲染
+
+### 3.4 保存逐项调整（不生成）
+
+```
+PUT /api/plans/:planId/homework-adjust
+Authorization: Bearer <token>
+
+Request:
+{
+  "adjustments": [
+    { "homeworkId": 5, "windowStart": "2026-08-01", "windowEnd": null, "locked": true }
+  ]
+}
+
+Response (200):
+{ "updated": 1 }
+```
+
+- 仅保存约束到 homework 表，不触发生成
+- 在「逐项调整」页每次调整后调用 + 再次调用 preview 刷新折线图
+
+---
+
 ## 通用约定
 
 ## 模块零：用户系统 API
