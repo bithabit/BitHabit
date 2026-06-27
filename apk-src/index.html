@@ -5,121 +5,244 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
   <title>BitHabit</title>
   <style>
+    :root {
+      --primary: #6366F1;
+      --primary-dark: #4F46E5;
+      --accent: #A78BFA;
+      --bg: #0F0A2E;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%; height: 100%;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      background: linear-gradient(160deg, #4F46E5 0%, #7C3AED 40%, #6D28D9 100%);
+
+    body {
+      width: 100vw; height: 100vh; height: 100dvh;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      color: #fff;
+      overflow: hidden;
       user-select: none; -webkit-user-select: none;
-    }
-
-    .splash-icon {
-      width: 100px; height: 100px;
-      background: rgba(255,255,255,0.12);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      border-radius: 26px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 52px;
-      margin-bottom: 24px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.15);
-      animation: float 3s ease-in-out infinite;
-    }
-    @keyframes float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-8px); }
-    }
-
-    .title {
-      font-size: 28px; font-weight: 700;
-      letter-spacing: 2px; margin-bottom: 6px;
-      text-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    }
-    .subtitle {
-      font-size: 14px; opacity: 0.8;
-      margin-bottom: 48px;
-      letter-spacing: 1px;
-    }
-
-    .features {
-      display: flex; flex-direction: column; gap: 14px;
-      margin-bottom: 48px; width: 240px;
-    }
-    .feature {
-      display: flex; align-items: center; gap: 10px;
-      font-size: 14px; opacity: 0.85;
-      background: rgba(255,255,255,0.08);
-      padding: 10px 16px; border-radius: 12px;
-      backdrop-filter: blur(5px);
-      -webkit-backdrop-filter: blur(5px);
-    }
-    .feature-icon { font-size: 20px; flex-shrink: 0; }
-
-    .enter-btn {
-      display: inline-block;
-      padding: 14px 56px;
-      background: rgba(255,255,255,0.95);
-      color: #4F46E5;
-      font-size: 17px; font-weight: 600;
-      border: none; border-radius: 16px;
-      cursor: pointer;
-      letter-spacing: 1px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-      transition: all 0.2s;
-      text-decoration: none;
       -webkit-tap-highlight-color: transparent;
     }
-    .enter-btn:active {
-      transform: scale(0.96);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      background: rgba(255,255,255,0.85);
+
+    /* ── 星空背景 ── */
+    .stars {
+      position: fixed; inset: 0; pointer-events: none;
+    }
+    .star {
+      position: absolute; background: #fff; border-radius: 50%;
+      animation: twinkle var(--d) ease-in-out infinite;
+      animation-delay: var(--delay);
+    }
+    @keyframes twinkle {
+      0%, 100% { opacity: 0.2; transform: scale(1); }
+      50% { opacity: 0.9; transform: scale(1.5); }
     }
 
-    .version {
-      position: fixed; bottom: 24px;
-      font-size: 12px; opacity: 0.4;
+    /* ── 光晕 ── */
+    .glow-1, .glow-2 {
+      position: fixed; border-radius: 50%; pointer-events: none;
+      filter: blur(80px); opacity: 0.3;
+    }
+    .glow-1 {
+      width: 280px; height: 280px;
+      background: var(--primary);
+      top: -100px; right: -60px;
+      animation: floatGlow 8s ease-in-out infinite;
+    }
+    .glow-2 {
+      width: 200px; height: 200px;
+      background: var(--accent);
+      bottom: -60px; left: -40px;
+      animation: floatGlow 6s ease-in-out infinite reverse;
+    }
+    @keyframes floatGlow {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(20px, -30px) scale(1.15); }
+      66% { transform: translate(-15px, 20px) scale(0.9); }
     }
 
-    /* 加载状态 */
-    .loading .enter-btn { pointer-events: none; opacity: 0.6; }
-    .loading .enter-btn::after { content: '...'; }
+    /* ── 主图标 ── */
+    .hero-icon {
+      position: relative; z-index: 2;
+      width: 100px; height: 100px;
+      margin-bottom: 28px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.04));
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 28px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 48px;
+      box-shadow: 0 16px 48px rgba(99,102,241,0.25), inset 0 1px 0 rgba(255,255,255,0.08);
+      animation: iconFloat 4s ease-in-out infinite;
+    }
+    @keyframes iconFloat {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-10px) scale(1.03); }
+    }
+
+    /* ── 标题区 ── */
+    .title-section {
+      position: relative; z-index: 2;
+      text-align: center; margin-bottom: 16px;
+    }
+    .app-name {
+      font-size: 32px; font-weight: 800;
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+      animation: shimmer 3s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+      0%, 100% { filter: brightness(1); }
+      50% { filter: brightness(1.3); }
+    }
+    .app-tagline {
+      font-size: 13px; color: rgba(255,255,255,0.5);
+      letter-spacing: 2px; font-weight: 500;
+    }
+
+    /* ── 进度指示器 ── */
+    .progress-section {
+      position: relative; z-index: 2;
+      margin-bottom: 40px; text-align: center;
+    }
+    .progress-dots {
+      display: flex; gap: 8px; justify-content: center;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: rgba(255,255,255,0.2);
+      animation: dotPulse 1.4s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dotPulse {
+      0%, 80%, 100% { opacity: 0.2; transform: scale(1); background: rgba(255,255,255,0.2); }
+      40% { opacity: 1; transform: scale(1.5); background: var(--accent); }
+    }
+
+    .loading-text {
+      margin-top: 14px;
+      color: rgba(255,255,255,0.4);
+      font-size: 12px; letter-spacing: 1px;
+    }
+
+    /* ── 底部装饰线 ── */
+    .bottom-line {
+      position: fixed; bottom: 40px; z-index: 2;
+      width: 120px; height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+      border-radius: 1px;
+    }
+
+    /* ── 粒子 ── */
+    .particles {
+      position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    }
+    .particle {
+      position: absolute;
+      width: 3px; height: 3px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: rise var(--rise-d) linear infinite;
+      animation-delay: var(--rise-delay);
+      opacity: 0;
+    }
+    @keyframes rise {
+      0% { transform: translateY(0) translateX(0) scale(1); opacity: 0; }
+      10% { opacity: 0.6; }
+      90% { opacity: 0; }
+      100% { transform: translateY(-400px) translateX(var(--drift)) scale(0); opacity: 0; }
+    }
+
+    /* ── 响应式 ── */
+    @media (max-width: 360px) {
+      .hero-icon { width: 80px; height: 80px; margin-bottom: 20px; font-size: 40px; }
+      .app-name { font-size: 26px; }
+      .app-tagline { font-size: 12px; }
+    }
   </style>
 </head>
 <body>
-  <div class="splash-icon">📚</div>
-  <div class="title">BitHabit</div>
-  <div class="subtitle">暑假作业计划助手</div>
+  <!-- 星空 -->
+  <div class="stars" id="stars"></div>
 
-  <div class="features">
-    <div class="feature">
-      <span class="feature-icon">📋</span>
-      <span>录入暑假作业</span>
-    </div>
-    <div class="feature">
-      <span class="feature-icon">📅</span>
-      <span>自动生成每日计划</span>
-    </div>
-    <div class="feature">
-      <span class="feature-icon">✅</span>
-      <span>逐日打卡追踪进度</span>
-    </div>
+  <!-- 光晕 -->
+  <div class="glow-1"></div>
+  <div class="glow-2"></div>
+
+  <!-- 粒子 -->
+  <div class="particles" id="particles"></div>
+
+  <!-- 主图标 -->
+  <div class="hero-icon">📚</div>
+
+  <!-- 标题 -->
+  <div class="title-section">
+    <div class="app-name">BitHabit</div>
+    <div class="app-tagline">暑假作业 · 计划助手</div>
   </div>
 
-  <button class="enter-btn" id="enterBtn" onclick="openApp()">进入应用</button>
+  <!-- 进度 -->
+  <div class="progress-section">
+    <div class="progress-dots">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+    <div class="loading-text">正在加载</div>
+  </div>
 
-  <div class="version">v1.0.1 · com.bithabit.app</div>
+  <!-- 底部装饰 -->
+  <div class="bottom-line"></div>
 
   <script>
-    function openApp() {
-      var btn = document.getElementById('enterBtn');
-      btn.textContent = '正在加载';
-      document.body.classList.add('loading');
-      // 用户主动触发导航，非自动重定向
-      window.location.href = 'https://bithabit.dpdns.org';
-    }
+    // ── 生成星空 ──
+    (function() {
+      var starsEl = document.getElementById('stars');
+      var frag = document.createDocumentFragment();
+      for (var i = 0; i < 50; i++) {
+        var star = document.createElement('div');
+        star.className = 'star';
+        var size = Math.random() * 2 + 1;
+        star.style.cssText =
+          'left:' + Math.random() * 100 + '%;' +
+          'top:' + Math.random() * 100 + '%;' +
+          'width:' + size + 'px;' +
+          'height:' + size + 'px;' +
+          '--d:' + (Math.random() * 3 + 2) + 's;' +
+          '--delay:' + (Math.random() * 3) + 's';
+        frag.appendChild(star);
+      }
+      starsEl.appendChild(frag);
+    })();
+
+    // ── 生成上升粒子 ──
+    (function() {
+      var particlesEl = document.getElementById('particles');
+      var frag = document.createDocumentFragment();
+      for (var i = 0; i < 15; i++) {
+        var p = document.createElement('div');
+        p.className = 'particle';
+        p.style.cssText =
+          'left:' + (Math.random() * 90 + 5) + '%;' +
+          'bottom:0;' +
+          '--rise-d:' + (Math.random() * 4 + 3) + 's;' +
+          '--rise-delay:' + (Math.random() * 5) + 's;' +
+          '--drift:' + (Math.random() * 40 - 20) + 'px';
+        frag.appendChild(p);
+      }
+      particlesEl.appendChild(frag);
+    })();
+
+    // ── 加载完成后跳转 ──
+    // 给动画 2 秒展示时间
+    setTimeout(function() {
+      window.location.replace('https://bithabit.dpdns.org');
+    }, 2000);
   </script>
 </body>
 </html>
