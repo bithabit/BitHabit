@@ -4,14 +4,14 @@
  *
  * POST /api/plans/generate.php
  *
- * 平均分配算法 v1：
+ * 整数单位分配算法：
  * 1. 汇总总工时
  * 2. 生成日期列表 between(start, end)
  * 3. 过滤全天休息/占用日
  * 4. 计算每日可用分钟（减去部分时段占用）
  * 5. 检查总工时 ≤ 总可用分钟
- * 6. 每天配额 = 总工时 / 可用天数
- * 7. 逐天轮询各科分配任务
+ * 6. 对每科作业：base = floor(units / days)，余数前 days 各多 1 单位
+ * 7. 校验每日工时 ≤ 可用分钟，超限自动延后
  */
 
 header('Content-Type: application/json; charset=utf-8');
@@ -194,59 +194,124 @@ if ($totalWorkMinutes > $totalAvailableMinutes) {
     exit;
 }
 
-// --- 5. 平均分配算法 v1 ---
-// 每天配额 = 总工时 / 可用天数
-// 每天内按比例分配给各科，按 subject 字母序排列
+// --- 5. 整数单位分配算法 ---
+// 对每科作业：base = floor(totalUnits / availableDays)
+// 余数 = totalUnits % availableDays → 前余数天各多分配 1 单位
+// 再用每日可用分钟校验，超限则自动延后
 
-$dailyQuota = $totalWorkMinutes / $availableDays;
-$taskOrder = array_keys($homework);
+$allocation = []; // [dayIndex][hwIdx] => units
+for ($d = 0; $d < $availableDays; $d++) {
+    $allocation[$d] = [];
+}
 
-error_log("Plan: totalWork={$totalWorkMinutes}, availableDays={$availableDays}, dailyQuota={$dailyQuota}");
+// 为每科作业分配整数单位
+foreach ($homework as $hwIdx => $hw) {
+    $totalUnits = (int)$hw['total_amount'];
+    if ($totalUnits <= 0 || $hw['time_per_unit'] <= 0) continue;
 
-foreach ($dates as &$day) {
-    $dayRemaining = $dailyQuota;
+    $base = (int)($totalUnits / $availableDays);
+    $extra = $totalUnits % $availableDays;
 
-    foreach ($taskOrder as $hwIdx) {
-        $hw = &$homework[$hwIdx];
-        if ($hw['remaining'] <= 0) continue;
+    for ($d = 0; $d < $availableDays; $d++) {
+        $units = $base + ($d < $extra ? 1 : 0);
+        if ($units > 0) {
+            $allocation[$d][$hwIdx] = $units;
+        }
+    }
+}
 
-        // 该科目占总工时的比例
-        $subjectTotalMin = $hw['total_amount'] * $hw['time_per_unit'];
-        $proportion = $subjectTotalMin / $totalWorkMinutes;
-        $allocMinutes = $dailyQuota * $proportion;
+// 校验每日工时并自动延后超限部分
+for ($d = 0; $d < $availableDays; $d++) {
+    // 计算该天总分钟
+    $dayMinutes = 0;
+    foreach ($allocation[$d] as $hwIdx => $units) {
+        $dayMinutes += $units * $homework[$hwIdx]['time_per_unit'];
+    }
 
-        // 不能超过该科剩余
-        $maxForSubject = $hw['remaining'] * $hw['time_per_unit'];
-        $allocMinutes = min($allocMinutes, $maxForSubject, $dayRemaining);
+    $available = $dates[$d]['availableMinutes'];
 
-        if ($allocMinutes <= 0) continue;
+    if ($dayMinutes > $available) {
+        // 超限：尝试移一个单位到后续有容量的日期
+        $hwIndicesInDay = array_keys($allocation[$d]);
+        // 按耗时降序排列（先移最耗时的任务）
+        usort($hwIndicesInDay, function ($a, $b) use ($allocation, $d, $homework) {
+            $ta = $allocation[$d][$a] * $homework[$a]['time_per_unit'];
+            $tb = $allocation[$d][$b] * $homework[$b]['time_per_unit'];
+            return $tb - $ta;
+        });
 
-        // 至少1个单位（如果能装下的话）
-        if ($allocMinutes < $hw['time_per_unit'] && $dayRemaining >= $hw['time_per_unit']) {
-            $allocMinutes = $hw['time_per_unit'];
+        foreach ($hwIndicesInDay as $hwIdx) {
+            $hwUnitMinutes = $homework[$hwIdx]['time_per_unit'];
+
+            while (($allocation[$d][$hwIdx] ?? 0) > 0 && $dayMinutes > $available) {
+                $moved = false;
+
+                for ($td = $d + 1; $td < $availableDays; $td++) {
+                    // 计算目标日剩余容量
+                    $targetMinutes = 0;
+                    foreach ($allocation[$td] as $tid => $tunits) {
+                        $targetMinutes += $tunits * $homework[$tid]['time_per_unit'];
+                    }
+                    $targetCapacity = $dates[$td]['availableMinutes'] - $targetMinutes;
+
+                    if ($targetCapacity >= $hwUnitMinutes) {
+                        // 移动一个单位到这天
+                        $allocation[$d][$hwIdx]--;
+                        $allocation[$td][$hwIdx] = ($allocation[$td][$hwIdx] ?? 0) + 1;
+                        $dayMinutes -= $hwUnitMinutes;
+                        $moved = true;
+                        break;
+                    }
+                }
+
+                if (!$moved) break; // 没有可移入的日期，停止尝试
+            }
         }
 
-        $amount = round($allocMinutes / $hw['time_per_unit'], 2);
-        $amount = min($amount, $hw['remaining']);
-        if ($amount <= 0) continue;
+        // 二次校验
+        $finalMinutes = 0;
+        foreach ($allocation[$d] as $hwIdx => $units) {
+            $finalMinutes += $units * $homework[$hwIdx]['time_per_unit'];
+        }
 
-        $actualMinutes = $amount * $hw['time_per_unit'];
+        if ($finalMinutes > $available) {
+            $dateStr = $dates[$d]['date'];
+            http_response_code(400);
+            echo json_encode([
+                'error' => "{$dateStr} 超出可用时长（{$available} 分钟），请增加可用时段或减少作业量",
+                'code' => 'DAILY_OVERFLOW',
+                'date' => $dateStr,
+                'allocated' => $finalMinutes,
+                'available' => $available,
+            ]);
+            exit;
+        }
+    }
+}
 
-        $hw['remaining'] = round($hw['remaining'] - $amount, 2);
-        $dayRemaining -= $actualMinutes;
+// 构建 dates 输出
+error_log("Plan: totalWork={$totalWorkMinutes}, availableDays={$availableDays}");
+
+foreach ($dates as $d => &$day) {
+    $day['tasks'] = [];
+    $day['allocatedMinutes'] = 0;
+
+    foreach ($allocation[$d] as $hwIdx => $units) {
+        if ($units <= 0) continue;
+
+        $hw = $homework[$hwIdx];
+        $actualMinutes = $units * $hw['time_per_unit'];
 
         $day['tasks'][] = [
             'homework_id' => $hw['id'],
             'subject' => $hw['subject'],
             'task_type' => $hw['task_type'],
-            'amount' => round($amount, 2),
+            'amount' => $units,
             'unit' => $hw['unit'],
-            'estimated_minutes' => (int)round($actualMinutes),
+            'estimated_minutes' => $actualMinutes,
         ];
+        $day['allocatedMinutes'] += $actualMinutes;
     }
-    unset($hw);
-
-    $day['allocatedMinutes'] = $dailyQuota - max(0, $dayRemaining);
 
     // 按 subject 字母序排列当天任务
     usort($day['tasks'], function ($a, $b) {
@@ -274,6 +339,7 @@ try {
 
     $sortOrder = 0;
     foreach ($dates as $day) {
+        if (empty($day['tasks'])) continue; // 跳过没有任务的空白天
         foreach ($day['tasks'] as $task) {
             $taskStmt->bind_param(
                 'iisdii',

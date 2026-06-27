@@ -1,5 +1,9 @@
 <template>
-  <div class="page">
+  <div class="page" @click="closeMenu">
+
+    <!-- 页面遮罩（菜单打开时） -->
+    <div class="menu-overlay" v-if="showMenu !== null" @click="closeMenu"></div>
+
     <header class="page-header">
       <h2>📚 我的作业</h2>
       <span class="count-badge" v-if="store.items.length">{{ store.items.length }} 条</span>
@@ -7,22 +11,102 @@
 
     <!-- 作业列表 -->
     <div class="list-section" v-if="store.items.length">
-      <div class="homework-card" v-for="hw in store.items" :key="hw.id">
+      <div
+        class="homework-card"
+        v-for="hw in store.items"
+        :key="hw.id"
+        :class="{ 'is-editing': editingId === hw.id }"
+      >
+        <!-- 主信息行 -->
         <div class="hw-main">
           <span class="hw-subject">{{ subjectIcon(hw.subject) }} {{ hw.subject }}</span>
           <span class="hw-divider">|</span>
           <span class="hw-type">{{ hw.task_type }}</span>
           <span class="hw-amount">{{ formatAmount(hw.total_amount) }}{{ hw.unit }}</span>
+          <button class="btn-menu" @click.stop="toggleMenu(hw.id)" :class="{ active: showMenu === hw.id }">⋯</button>
         </div>
+
+        <!-- 元信息行 -->
         <div class="hw-meta">
           <span class="hw-time" v-if="hw.time_per_unit">{{ hw.time_per_unit }} 分/{{ hw.unit }}</span>
           <span class="hw-notes" v-if="hw.notes">{{ hw.notes }}</span>
         </div>
-        <button class="btn-delete" @click="handleDelete(hw.id)" :disabled="deleting === hw.id">
-          {{ deleting === hw.id ? '...' : '✕' }}
-        </button>
+
+        <!-- 底部：进度条（已计划）或添加入口（未计划） -->
+        <div class="hw-footer" v-if="hw.in_plan">
+          <div class="progress-bar-wrap">
+            <div
+              class="progress-bar-fill"
+              :style="{ width: progressPercent(hw) + '%' }"
+              :class="{ full: progressPercent(hw) >= 100 }"
+            ></div>
+          </div>
+          <span class="progress-text">{{ progressPercent(hw) }}% · {{ formatAmount(hw.completed_amount) }}/{{ formatAmount(hw.total_amount) }} {{ hw.unit }}</span>
+        </div>
+        <div class="hw-footer hw-footer-plan" v-else>
+          <span class="plan-link" @click.stop="goPlanCreate">📋 添加到计划</span>
+        </div>
+
+        <!-- ⋯ 上下文菜单 -->
+        <Transition name="menu-pop">
+          <div class="context-menu" v-if="showMenu === hw.id" @click.stop>
+            <button class="menu-item" @click="handleEdit(hw)">
+              <span class="menu-icon">✏️</span> 编辑作业
+            </button>
+            <button class="menu-item" v-if="!hw.in_plan" @click="goPlanCreate">
+              <span class="menu-icon">📋</span> 添加到计划
+            </button>
+            <button class="menu-item" v-else @click="goPlanCreate">
+              <span class="menu-icon">🔄</span> 重新计划
+            </button>
+            <div class="menu-divider"></div>
+            <button class="menu-item menu-item-danger" @click="handleDelete(hw.id)">
+              <span class="menu-icon">🗑</span> 删除
+            </button>
+          </div>
+        </Transition>
+
+        <!-- 编辑表单（行内展开） -->
+        <div class="inline-edit" v-if="editingId === hw.id">
+          <div class="edit-row">
+            <div class="edit-field half">
+              <label>科目</label>
+              <select v-model="editForm.subject">
+                <option value="">选择</option>
+                <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </div>
+            <div class="edit-field half">
+              <label>类型</label>
+              <input type="text" v-model="editForm.taskType" placeholder="模拟卷" />
+            </div>
+          </div>
+          <div class="edit-row">
+            <div class="edit-field half">
+              <label>总量</label>
+              <input type="number" v-model.number="editForm.totalAmount" min="0.01" step="0.01" />
+            </div>
+            <div class="edit-field half">
+              <label>单位</label>
+              <input type="text" v-model="editForm.unit" placeholder="套" />
+            </div>
+          </div>
+          <div class="edit-field">
+            <label>耗时/单位（分钟）</label>
+            <input type="number" v-model.number="editForm.timePerUnit" min="1" placeholder="默认 60" />
+          </div>
+          <div class="edit-field">
+            <label>备注</label>
+            <input type="text" v-model="editForm.notes" maxlength="200" />
+          </div>
+          <div class="edit-actions">
+            <button class="btn-secondary btn-press" @click="cancelEdit">取消</button>
+            <button class="btn-primary btn-press" @click="saveEdit(hw.id)" :disabled="!editValid">保存</button>
+          </div>
+        </div>
       </div>
     </div>
+
     <div class="empty-state" v-else-if="!store.loading && !showForm">
       <span class="empty-icon">📝</span>
       <p>还没有录入作业</p>
@@ -106,12 +190,37 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useHomeworkStore } from '../stores/homework'
-import { aiApi, type AiTask } from '../api'
+import { aiApi, type AiTask, type HomeworkItem } from '../api'
 
+const router = useRouter()
 const store = useHomeworkStore()
+
+// 菜单状态
+const showMenu = ref<number | null>(null)
+const editingId = ref<number | null>(null)
+
+// 新建表单
 const showForm = ref(false)
 const deleting = ref<number | null>(null)
+
+// 编辑表单
+const editForm = ref({
+  subject: '',
+  taskType: '',
+  totalAmount: 1 as number | null,
+  unit: '',
+  timePerUnit: null as number | null,
+  notes: '',
+})
+
+const editValid = computed(() => {
+  return editForm.value.subject
+    && editForm.value.taskType.trim()
+    && editForm.value.totalAmount && editForm.value.totalAmount > 0
+    && editForm.value.unit.trim()
+})
 
 // 预设数据
 const subjects = ['数学', '英语', '语文', '物理', '化学', '生物', '历史', '地理', '政治']
@@ -141,6 +250,14 @@ onMounted(() => {
   store.fetchAll()
 })
 
+function closeMenu() {
+  showMenu.value = null
+}
+
+function toggleMenu(id: number) {
+  showMenu.value = showMenu.value === id ? null : id
+}
+
 function subjectIcon(subject: string): string {
   const icons: Record<string, string> = {
     '数学': '📐', '英语': '🇬🇧', '语文': '📖', '物理': '⚛️',
@@ -150,10 +267,54 @@ function subjectIcon(subject: string): string {
 }
 
 function formatAmount(n: number): string {
-  // 如果是整数就显示整数
   return Number.isInteger(n) ? n.toString() : n.toFixed(2).replace(/\.?0+$/, '')
 }
 
+function progressPercent(hw: HomeworkItem): number {
+  if (!hw.total_amount || hw.total_amount <= 0) return 0
+  const pct = Math.round((hw.completed_amount / hw.total_amount) * 100)
+  return Math.min(pct, 100)
+}
+
+function goPlanCreate() {
+  closeMenu()
+  router.push('/plan-create')
+}
+
+// 编辑操作
+function handleEdit(hw: HomeworkItem) {
+  closeMenu()
+  editingId.value = hw.id
+  editForm.value = {
+    subject: hw.subject,
+    taskType: hw.task_type,
+    totalAmount: hw.total_amount,
+    unit: hw.unit,
+    timePerUnit: hw.time_per_unit,
+    notes: hw.notes,
+  }
+}
+
+function cancelEdit() {
+  editingId.value = null
+}
+
+async function saveEdit(id: number) {
+  if (!editValid.value) return
+  const ok = await store.update(id, {
+    subject: editForm.value.subject,
+    type: editForm.value.taskType,
+    totalAmount: editForm.value.totalAmount ?? 1,
+    unit: editForm.value.unit,
+    timePerUnit: editForm.value.timePerUnit || 60,
+    notes: editForm.value.notes,
+  })
+  if (ok) {
+    editingId.value = null
+  }
+}
+
+// 新建操作
 async function handleAddAndContinue() {
   if (!form.value.totalAmount) return
   const ok = await store.create({
@@ -193,6 +354,7 @@ function resetForm() {
 }
 
 async function handleDelete(id: number) {
+  closeMenu()
   if (!confirm('确定删除这条作业？')) return
   deleting.value = id
   await store.remove(id)
@@ -244,6 +406,7 @@ async function handleAiConfirm() {
   padding-bottom: 100px;
   max-width: 600px;
   margin: 0 auto;
+  position: relative;
 }
 
 .page-header {
@@ -268,6 +431,15 @@ async function handleAiConfirm() {
   font-weight: 500;
 }
 
+/* ---------- 菜单遮罩 ---------- */
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  background: transparent;
+}
+
+/* ---------- 卡片列表 ---------- */
 .list-section {
   display: flex;
   flex-direction: column;
@@ -284,14 +456,27 @@ async function handleAiConfirm() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  animation: fadeInUp var(--duration-slow) ease both;
 }
 
+.homework-card:nth-child(1) { animation-delay: 0s; }
+.homework-card:nth-child(2) { animation-delay: 0.06s; }
+.homework-card:nth-child(3) { animation-delay: 0.12s; }
+.homework-card:nth-child(4) { animation-delay: 0.18s; }
+.homework-card:nth-child(5) { animation-delay: 0.24s; }
+
+.homework-card.is-editing {
+  border: 2px solid var(--color-primary);
+}
+
+/* ---------- 主信息行 ---------- */
 .hw-main {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
   font-size: 0.9375rem;
+  padding-right: 32px;
 }
 
 .hw-subject {
@@ -312,6 +497,29 @@ async function handleAiConfirm() {
   color: var(--color-primary);
 }
 
+/* ---------- ⋯ 菜单按钮 ---------- */
+.btn-menu {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  color: var(--color-text-placeholder);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  line-height: 1;
+  letter-spacing: 2px;
+}
+
+.btn-menu:hover,
+.btn-menu.active {
+  color: var(--color-text);
+  background: var(--color-bg-secondary, rgba(0,0,0,0.04));
+}
+
+/* ---------- 元信息 ---------- */
 .hw-meta {
   display: flex;
   gap: 10px;
@@ -319,24 +527,178 @@ async function handleAiConfirm() {
   color: var(--color-text-placeholder);
 }
 
-.btn-delete {
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  background: none;
-  border: none;
-  font-size: 1rem;
-  color: var(--color-text-placeholder);
+/* ---------- 底部：进度条 / 计划入口 ---------- */
+.hw-footer {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress-bar-wrap {
+  flex: 1;
+  height: 5px;
+  background: var(--color-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--color-success, #22c55e);
+  border-radius: 3px;
+  transition: width 0.6s ease;
+  width: 0;
+}
+
+.progress-bar-fill.full {
+  background: var(--color-success, #22c55e);
+}
+
+.progress-text {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  min-width: 70px;
+  text-align: right;
+}
+
+.hw-footer-plan {
+  justify-content: flex-start;
+}
+
+.plan-link {
+  font-size: 0.8125rem;
+  color: var(--color-primary);
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
+  font-weight: 500;
 }
 
-.btn-delete:hover {
+.plan-link:hover {
+  opacity: 0.8;
+}
+
+/* ---------- 上下文菜单 ---------- */
+.context-menu {
+  position: absolute;
+  right: 8px;
+  top: 38px;
+  z-index: 10;
+  background: var(--color-card);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  padding: 6px 0;
+  min-width: 160px;
+  overflow: hidden;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-family);
+}
+
+.menu-item:hover {
+  background: var(--color-bg-secondary, rgba(0,0,0,0.04));
+}
+
+.menu-item-danger {
   color: var(--color-error);
-  background: var(--color-error-bg);
 }
 
+.menu-icon {
+  font-size: 1rem;
+  width: 20px;
+  text-align: center;
+}
+
+.menu-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 0;
+}
+
+/* ---------- 行内编辑表单 ---------- */
+.inline-edit {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.edit-row {
+  display: flex;
+  gap: 10px;
+}
+
+.edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.edit-field.half {
+  flex: 1;
+}
+
+.edit-field label {
+  font-size: 0.75rem;
+  color: var(--color-text-placeholder);
+}
+
+.edit-field input,
+.edit-field select {
+  padding: 8px 10px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-family: var(--font-family);
+  background: var(--color-input-bg);
+  color: var(--color-text);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.edit-field input:focus,
+.edit-field select:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ---------- 菜单弹出动画 ---------- */
+.menu-pop-enter-active {
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.menu-pop-leave-active {
+  transition: all 0.12s ease;
+}
+.menu-pop-enter-from {
+  opacity: 0;
+  transform: scale(0.95) translateY(-4px);
+}
+.menu-pop-leave-to {
+  opacity: 0;
+  transform: scale(0.95) translateY(-2px);
+}
+
+/* ---------- 空状态 ---------- */
 .empty-state {
   text-align: center;
   padding: 48px 20px;
@@ -354,7 +716,7 @@ async function handleAiConfirm() {
   color: var(--color-text-placeholder);
 }
 
-/* 表单 */
+/* ---------- 新建表单 ---------- */
 .form-section {
   background: var(--color-card);
   border-radius: var(--radius);
@@ -473,7 +835,7 @@ async function handleAiConfirm() {
   text-align: center;
 }
 
-/* AI 区 */
+/* ---------- AI 区 ---------- */
 .ai-section {
   background: var(--color-card);
   border-radius: var(--radius);
@@ -534,17 +896,6 @@ async function handleAiConfirm() {
   color: var(--color-text-placeholder);
   font-size: 0.8125rem;
 }
-
-/* 🎬 卡片入场动画 */
-.homework-card {
-  animation: fadeInUp var(--duration-slow) ease both;
-}
-
-.homework-card:nth-child(1) { animation-delay: 0s; }
-.homework-card:nth-child(2) { animation-delay: 0.06s; }
-.homework-card:nth-child(3) { animation-delay: 0.12s; }
-.homework-card:nth-child(4) { animation-delay: 0.18s; }
-.homework-card:nth-child(5) { animation-delay: 0.24s; }
 
 /* 🎬 表单展开/折叠 */
 .form-slide-enter-active {

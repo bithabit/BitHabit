@@ -110,6 +110,10 @@ export interface HomeworkItem {
   time_per_unit: number | null
   notes: string
   created_at: string
+  // 进度信息
+  completed_amount: number
+  in_plan: boolean
+  plan_names: string[]
 }
 
 export interface HomeworkInput {

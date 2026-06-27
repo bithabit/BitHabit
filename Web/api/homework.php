@@ -30,12 +30,31 @@ $defaultTimePerUnit = [
 ];
 const DEFAULT_TIME_PER_UNIT = 60; // 兜底：1 小时
 
-// --- GET: 列出作业 ---
+// --- GET: 列出作业（含进度信息） ---
 if ($method === 'GET') {
-    $stmt = $conn->prepare(
-        'SELECT id, subject, task_type, total_amount, unit, time_per_unit, notes, created_at 
-         FROM homework WHERE user_id = ? ORDER BY created_at DESC'
-    );
+    $sql = '
+        SELECT h.id, h.subject, h.task_type, h.total_amount, h.unit, h.time_per_unit, h.notes, h.created_at,
+               COALESCE(c.completed_amount, 0) AS completed_amount,
+               CASE WHEN p.homework_id IS NOT NULL THEN 1 ELSE 0 END AS in_plan,
+               COALESCE(p.plan_names, \'\') AS plan_names
+        FROM homework h
+        LEFT JOIN (
+            SELECT homework_id, SUM(amount) AS completed_amount
+            FROM plan_tasks
+            WHERE completed = 1
+            GROUP BY homework_id
+        ) c ON c.homework_id = h.id
+        LEFT JOIN (
+            SELECT pt.homework_id, GROUP_CONCAT(DISTINCT pl.name SEPARATOR \'|\') AS plan_names
+            FROM plan_tasks pt
+            JOIN plans pl ON pl.id = pt.plan_id
+            GROUP BY pt.homework_id
+        ) p ON p.homework_id = h.id
+        WHERE h.user_id = ?
+        ORDER BY h.created_at DESC
+    ';
+
+    $stmt = $conn->prepare($sql);
     $stmt->bind_param('i', $userId);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -44,7 +63,12 @@ if ($method === 'GET') {
     while ($row = $result->fetch_assoc()) {
         $row['id'] = (int)$row['id'];
         $row['total_amount'] = (float)$row['total_amount'];
+        $row['completed_amount'] = (float)$row['completed_amount'];
         $row['time_per_unit'] = $row['time_per_unit'] !== null ? (int)$row['time_per_unit'] : null;
+        $row['in_plan'] = (bool)(int)$row['in_plan'];
+        $row['plan_names'] = empty($row['plan_names'])
+            ? []
+            : explode('|', trim($row['plan_names']));
         $homework[] = $row;
     }
 
