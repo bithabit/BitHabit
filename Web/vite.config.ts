@@ -7,7 +7,8 @@ export default defineConfig({
   plugins: [
     vue(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' 模式让 APP 自行控制更新时机，避免 SW 静默缓存旧内容
+      registerType: 'prompt',
       manifest: {
         name: 'BitHabit - 暑假作业计划助手',
         short_name: 'BitHabit',

@@ -40,6 +40,11 @@ NODE_ENV=development npm run build
 # 3. 归一化 HTML 输出名（Vite 使用 index.dev.html 入口 → 输出 dist/index.dev.html）
 if [ -f dist/index.dev.html ] && [ ! -f dist/index.html ]; then
     mv dist/index.dev.html dist/index.html
+    # 同时修正 SW precache 中的文件名（构建时仍是 index.dev.html）
+    if [ -f dist/sw.js ]; then
+        sed -i 's|"index.dev.html"|"index.html"|g' dist/sw.js
+        echo "  🔧 SW precache: index.dev.html → index.html"
+    fi
 fi
 
 # 4. 部署静态资源到 Apache 可访问的根目录

@@ -1,6 +1,7 @@
 <template>
   <div id="app-root">
     <router-view />
+    <UpdatePrompt />
     <!-- 底部导航栏（仅登录后显示） -->
     <nav class="bottom-nav" v-if="auth.token">
       <router-link to="/" class="nav-item" active-class="nav-active" :class="{ 'nav-active': isTodayActive }">
@@ -23,6 +24,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
+import UpdatePrompt from './components/UpdatePrompt.vue'
 
 const auth = useAuthStore()
 const route = useRoute()

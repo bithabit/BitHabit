@@ -1,7 +1,7 @@
 # BitHabit - API 文档
 
-> 最后更新：2026-06-26  
-> 状态：设计中 · 持续更新  
+> 最后更新：2026-06-27  
+> 状态：持续更新  
 > 目标读者：Coder Agent
 
 ---
@@ -98,6 +98,136 @@ Response (400):
 - 与作业解析共用 DeepSeek API，但 prompt 模板和输出结构不同
 - 同样后端代理，Key 不暴露
 - 频率限制共享（共 5 次/分钟）
+
+---
+
+## 模块〇之补充：计划列表 & 今日任务 API
+
+> 2026-06-27：任务 #2 导航重构新增
+
+### 1.7 获取计划列表
+
+```
+GET /api/plans/list.php
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "plans": [
+    {
+      "id": 1,
+      "name": "暑假作业计划",
+      "start_date": "2026-07-01",
+      "end_date": "2026-08-30",
+      "strategy": "average",
+      "task_count": 180,
+      "completed_count": 45,
+      "created_at": "2026-06-27 10:00:00"
+    }
+  ]
+}
+```
+
+- 按 `created_at DESC` 排序
+- `task_count` = 该计划下 plan_tasks 总数
+- `completed_count` = `completed = 1` 的任务数
+- 需 JWT 认证，仅返回当前用户的计划
+
+### 1.8 获取今日任务
+
+```
+GET /api/plans/today.php
+Authorization: Bearer <token>
+
+Response (200) - 有今日任务：
+{
+  "planId": 1,
+  "planName": "暑假作业计划",
+  "date": "2026-07-15",
+  "tasks": [
+    {
+      "id": 42,
+      "subject": "数学",
+      "taskType": "模拟卷",
+      "amount": 0.5,
+      "unit": "套",
+      "estimatedMinutes": 45,
+      "completed": false
+    }
+  ]
+}
+
+Response (200) - 无计划：
+{ "planId": null, "planName": null, "date": "2026-07-15", "tasks": [] }
+
+Response (200) - 有计划但今天无任务（休息日/超范围）：
+{ "planId": 1, "planName": "暑假作业计划", "date": "2026-07-15", "tasks": [] }
+```
+
+- 取用户最新计划（`created_at DESC LIMIT 1`）
+- 查 `plan_tasks` 中 `plan_id=? AND date=CURDATE()` 的记录
+- JOIN `homework` 获取 `subject, task_type, unit`
+
+### 1.9 切换任务完成状态
+
+```
+PATCH /api/plans/tasks/toggle.php
+Authorization: Bearer <token>
+
+Request:
+{ "id": 42 }
+
+Response (200):
+{ "id": 42, "completed": true, "completedAt": "2026-07-15T10:00:00" }
+```
+
+- 切换 `completed` 状态（0→1 或 1→0）
+- `completedAt`：完成时设为 `NOW()`，取消完成时设为 null
+- 需验证该 task 属于当前用户的计划（防止跨用户操作）
+
+### 1.10 月度日历汇总
+
+```
+GET /api/plans/calendar.php?planId=1&year=2026&month=7
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "planId": 1,
+  "planName": "暑假作业计划",
+  "year": 2026,
+  "month": 7,
+  "startDate": "2026-07-01",
+  "endDate": "2026-08-30",
+  "days": [
+    { "date": "2026-07-01", "taskCount": 4, "completedCount": 2, "totalMinutes": 120 },
+    { "date": "2026-07-05", "taskCount": 0, "completedCount": 0, "totalMinutes": 0 }
+  ]
+}
+```
+
+- `days` 仅包含有数据的日期（taskCount=0 即休息日）
+- `startDate`/`endDate` 供前端判断日期是否在计划范围内
+- 需验证 plan 属于当前用户
+
+### 1.11 单日任务列表
+
+```
+GET /api/plans/day.php?planId=1&date=2026-07-15
+Authorization: Bearer <token>
+
+Response (200):
+{
+  "planId": 1,
+  "date": "2026-07-15",
+  "tasks": [
+    { "id": 42, "subject": "数学", "taskType": "模拟卷", "amount": 0.5, "unit": "套", "estimatedMinutes": 45, "completed": false }
+  ]
+}
+```
+
+- 查 `plan_tasks` JOIN `homework`
+- 需验证 plan 属于当前用户
 
 ---
 
